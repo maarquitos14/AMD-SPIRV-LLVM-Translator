@@ -8,7 +8,7 @@
 ; RUN: llvm-spirv -spirv-text -r %t.spt -o %t.rev.bc
 ; RUN: llvm-dis < %t.rev.bc | FileCheck %s --check-prefix=CHECK-LLVM
 
-; CHECK-SPIRV: Capability ArbitraryPrecisionIntegersALTERA
+; CHECK-SPIRV: Capability ArbitraryPrecisionIntegersINTEL
 ; CHECK-SPIRV: Extension "SPV_ALTERA_arbitrary_precision_integers"
 
 ; CHECK-SPIRV-DAG: TypeInt {{[0-9]+}} 13 0

@@ -159,7 +159,7 @@ public:
         CV.push_back(CapabilityInt4TypeINTEL);
         return CV;
       }
-      CV.push_back(static_cast<Capability>(5844));
+      CV.push_back(CapabilityArbitraryPrecisionIntegersINTEL);
       return CV;
     }
     case 8:
@@ -175,8 +175,10 @@ public:
       break;
     default:
       if (Module->isAllowedToUseExtension(
+              ExtensionID::SPV_INTEL_arbitrary_precision_integers) ||
+          Module->isAllowedToUseExtension(
               ExtensionID::SPV_ALTERA_arbitrary_precision_integers))
-        CV.push_back(static_cast<Capability>(5844));
+        CV.push_back(CapabilityArbitraryPrecisionIntegersINTEL);
     }
     return CV;
   }
@@ -185,6 +187,9 @@ public:
     case 4: {
       if (Module->isAllowedToUseExtension(ExtensionID::SPV_INTEL_int4))
         return ExtensionID::SPV_INTEL_int4;
+      if (Module->isAllowedToUseExtension(
+              ExtensionID::SPV_INTEL_arbitrary_precision_integers))
+        return ExtensionID::SPV_INTEL_arbitrary_precision_integers;
       return ExtensionID::SPV_ALTERA_arbitrary_precision_integers;
     }
     case 8:
@@ -193,6 +198,9 @@ public:
     case 64:
       return {};
     default:
+      if (Module->isAllowedToUseExtension(
+              ExtensionID::SPV_INTEL_arbitrary_precision_integers))
+        return ExtensionID::SPV_INTEL_arbitrary_precision_integers;
       return ExtensionID::SPV_ALTERA_arbitrary_precision_integers;
     }
   }
@@ -205,6 +213,8 @@ protected:
              Module->isAllowedToUseExtension(ExtensionID::SPV_INTEL_int4)) ||
             BitWidth == 8 || BitWidth == 16 || BitWidth == 32 ||
             BitWidth == 64 ||
+            Module->isAllowedToUseExtension(
+                ExtensionID::SPV_INTEL_arbitrary_precision_integers) ||
             Module->isAllowedToUseExtension(
                 ExtensionID::SPV_ALTERA_arbitrary_precision_integers)) &&
            "Invalid bit width");

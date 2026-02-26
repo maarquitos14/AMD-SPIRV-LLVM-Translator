@@ -389,6 +389,8 @@ SPIRVType *LLVMToSPIRVBase::transType(Type *T) {
     // parameterized only as 32 bit, plus any additional sizes enabled by
     // capabilities.
     if (BM->isAllowedToUseExtension(
+            ExtensionID::SPV_INTEL_arbitrary_precision_integers) ||
+        BM->isAllowedToUseExtension(
             ExtensionID::SPV_ALTERA_arbitrary_precision_integers) ||
         BM->getErrorLog().checkError(
             (BitWidth == 4 &&
@@ -1408,7 +1410,9 @@ SPIRVValue *LLVMToSPIRVBase::transConstant(Value *V) {
     if (BitWidth > 64) {
       BM->getErrorLog().checkError(
           BM->isAllowedToUseExtension(
-              ExtensionID::SPV_ALTERA_arbitrary_precision_integers),
+              ExtensionID::SPV_INTEL_arbitrary_precision_integers) ||
+              BM->isAllowedToUseExtension(
+                  ExtensionID::SPV_ALTERA_arbitrary_precision_integers),
           SPIRVEC_InvalidBitWidth, std::to_string(BitWidth));
       return BM->addConstant(ExpectedType, ConstI->getValue());
     }

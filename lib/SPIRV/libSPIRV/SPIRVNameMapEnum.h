@@ -589,8 +589,8 @@ template <> inline void SPIRVMap<Capability, std::string>::init() {
   add(CapabilityFunctionFloatControlINTEL, "FunctionFloatControlINTEL");
   add(CapabilityFPGAMemoryAttributesINTEL, "FPGAMemoryAttributesINTEL");
   add(CapabilityFPFastMathModeINTEL, "FPFastMathModeINTEL");
-  add(static_cast<Capability>(5844),
-      "ArbitraryPrecisionIntegersALTERA");
+  add(CapabilityArbitraryPrecisionIntegersINTEL,
+      "ArbitraryPrecisionIntegersINTEL");
   add(CapabilityArbitraryPrecisionFloatingPointINTEL,
       "ArbitraryPrecisionFloatingPointINTEL");
   add(CapabilityUnstructuredLoopControlsINTEL, "UnstructuredLoopControlsINTEL");

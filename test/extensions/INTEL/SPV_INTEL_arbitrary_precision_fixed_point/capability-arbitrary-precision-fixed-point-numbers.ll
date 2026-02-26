@@ -109,7 +109,7 @@
 ; RUN: llvm-dis < %t.rev.bc | FileCheck %s --check-prefix=CHECK-LLVM
 
 ; CHECK-SPIRV: 2 Capability Kernel
-; CHECK-SPIRV: 2 Capability ArbitraryPrecisionIntegersALTERA
+; CHECK-SPIRV: 2 Capability ArbitraryPrecisionIntegersINTEL
 ; CHECK-SPIRV: 2 Capability ArbitraryPrecisionFixedPointINTEL
 ; CHECK-SPIRV: 11 Extension "SPV_ALTERA_arbitrary_precision_integers"
 ; CHECK-SPIRV: 12 Extension "SPV_INTEL_arbitrary_precision_fixed_point"

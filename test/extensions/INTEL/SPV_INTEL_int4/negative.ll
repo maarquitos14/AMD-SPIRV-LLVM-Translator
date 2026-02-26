@@ -8,7 +8,7 @@
 ; RUN: not llvm-spirv %t.bc 2>&1 | FileCheck %s --check-prefix=CHECK-ERROR
 ; CHECK-ERROR: InvalidBitWidth: Invalid bit width in input: 4
 
-; CHECK-SPIRV: Capability ArbitraryPrecisionIntegersALTERA
+; CHECK-SPIRV: Capability ArbitraryPrecisionIntegersINTEL
 ; CHECK-SPIRV: Extension "SPV_ALTERA_arbitrary_precision_integers"
 ; CHECK-SPIRV: TypeInt [[#Int4:]] 4 0
 ; CHECK-SPIRV: Constant [[#Int4]] [[#Const:]] 1
