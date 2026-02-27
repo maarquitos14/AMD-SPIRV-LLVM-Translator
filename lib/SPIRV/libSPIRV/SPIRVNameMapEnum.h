@@ -58,6 +58,7 @@ template <> inline void SPIRVMap<LinkageType, std::string>::init() {
   add(LinkageTypeExport, "Export");
   add(LinkageTypeImport, "Import");
   add(LinkageTypeLinkOnceODR, "LinkOnceODR");
+  add(internal::LinkageTypeWeak, "Weak");
   add(internal::LinkageTypeInternal, "Internal");
   add(LinkageTypeMax, "Max");
 }
@@ -703,6 +704,7 @@ template <> inline void SPIRVMap<Capability, std::string>::init() {
   add(internal::CapabilityInt16AtomicsINTEL, "Int16AtomicsINTEL");
   add(internal::CapabilityAtomicBFloat16LoadStoreINTEL,
       "AtomicBFloat16LoadStoreINTEL");
+  add(CapabilityFloatControls2, "FloatControls2");
 }
 SPIRV_DEF_NAMEMAP(Capability, SPIRVCapabilityNameMap)
 
