@@ -1240,26 +1240,25 @@ static void applyNoIntegerWrapDecorations(const SPIRVValue *BV,
   }
 }
 
-static void applyFPFastMathModeDecorations(const SPIRVValue *BV,
-                                           Instruction *Inst) {
-  SPIRVWord V;
-  FastMathFlags FMF;
+void SPIRVToLLVM::applyFPFastMathModeDecorations(const SPIRVValue *BV,
+                                                 Instruction *Inst) {
+  if (!isa<FPMathOperator>(Inst) &&
+      (!M->getTargetTriple().isAMDGCN() || !isa<CallBase>(Inst)))
+    return;
+
+  SPIRVWord V{0};
   if (BV->hasDecorate(DecorationFPFastMathMode, 0, &V)) {
-    if (V & FPFastMathModeNotNaNMask)
-      FMF.setNoNaNs();
-    if (V & FPFastMathModeNotInfMask)
-      FMF.setNoInfs();
-    if (V & FPFastMathModeNSZMask)
-      FMF.setNoSignedZeros();
-    if (V & FPFastMathModeAllowRecipMask)
-      FMF.setAllowReciprocal();
-    if (V & FPFastMathModeAllowContractFastINTELMask)
-      FMF.setAllowContract();
-    if (V & FPFastMathModeAllowReassocINTELMask)
-      FMF.setAllowReassoc();
-    if (V & FPFastMathModeFastMask)
-      FMF.setFast();
+    FastMathFlags FMF = translateFastMathFlags(V);
     Inst->setFastMathFlags(FMF);
+    return;
+  }
+
+  // Get the scalar type to handle vector operands. And get the first operand
+  // type (instead of the result) due to fcmp instructions.
+  Type *FloatType = Inst->getOperand(0)->getType()->getScalarType();
+  auto Func2FMF = FuncToFastMathFlags.find({Inst->getFunction(), FloatType});
+  if (Func2FMF != FuncToFastMathFlags.end()) {
+    Inst->setFastMathFlags(Func2FMF->second);
   }
 }
 
@@ -1821,13 +1820,18 @@ Value *SPIRVToLLVM::transValueWithoutDecoration(SPIRVValue *BV, Function *F,
                              ? GlobalValue::UnnamedAddr::Global
                              : GlobalValue::UnnamedAddr::None);
     LVar->setInitializer(Initializer);
-    if (BVar->hasDecorate(DecorationUserTypeGOOGLE) &&
-        M->getTargetTriple().getVendor() == Triple::VendorType::AMD) {
-      const auto Dec = BM->get<SPIRVString>(
-          *BVar->getDecorate(DecorationUserTypeGOOGLE).cbegin());
-      LVar->setExternallyInitialized(Dec->getStr() == "externally_initialized");
+    if (M->getTargetTriple().isAMDGCN()) {
+      if (BVar->hasDecorate(DecorationUserTypeGOOGLE)) {
+        // This is how the Translator stashes externally initialized
+        // TODO: unify with the BE
+        const auto Dec = BM->get<SPIRVString>(
+            *BVar->getDecorate(DecorationUserTypeGOOGLE).cbegin());
+        LVar->setExternallyInitialized(Dec->getStr() == "externally_initialized");
+      } else if (BVar->hasDecorate(DecorationHostAccessINTEL)) {
+        // This is how the BE stashes externally_initialized
+        LVar->setExternallyInitialized(true);
+      }
     }
-
     if (IsVectorCompute) {
       LVar->addAttribute(kVCMetadata::VCGlobalVariable);
       SPIRVWord Offset;
@@ -3452,6 +3456,9 @@ void SPIRVToLLVM::transFunctionAttrs(SPIRVFunction *BF, Function *F) {
       default:
         break; // do nothing
       }
+      // AMDGPU doesn't use ByVal, it is actually a masquerading ByRef.
+      if (M->getTargetTriple().isAMDGCN() && LLVMKind == Attribute::ByVal)
+        LLVMKind = Attribute::ByRef;
       // Make sure to use a correct constructor for a typed/typeless attribute
       auto A = AttrTy ? Attribute::get(*Context, LLVMKind, AttrTy)
                       : (LLVMKind != Attribute::Captures)
@@ -3528,6 +3535,77 @@ static void validatePhiPredecessors(Function *F) {
 }
 } // namespace
 
+FastMathFlags SPIRVToLLVM::translateFastMathFlags(SPIRVWord V) const {
+  FastMathFlags FMF;
+  if (V & FPFastMathModeNotNaNMask)
+    FMF.setNoNaNs();
+  if (V & FPFastMathModeNotInfMask)
+    FMF.setNoInfs();
+  if (V & FPFastMathModeNSZMask)
+    FMF.setNoSignedZeros();
+  if (V & FPFastMathModeAllowRecipMask)
+    FMF.setAllowReciprocal();
+  static_assert(FPFastMathModeAllowContractFastINTELMask ==
+                FPFastMathModeAllowContractMask);
+  if (V & FPFastMathModeAllowContractFastINTELMask)
+    FMF.setAllowContract();
+  static_assert(FPFastMathModeAllowReassocINTELMask ==
+                FPFastMathModeAllowReassocMask);
+  if (V & FPFastMathModeAllowReassocINTELMask)
+    FMF.setAllowReassoc();
+  if (V & FPFastMathModeFastMask) {
+    // There is no FPFastMathMode flag that represents LLVM approximate
+    // functions flag `afn`. Even the FPFastMathMode Fast flag should not imply
+    // it, but to avoid changing the previous behaviour we make it equivalent to
+    // LLVM's.
+    assert(!BM->hasCapability(CapabilityFloatControls2) &&
+           "FloatControls2 deprecates FPFastMathModeFast.");
+    FMF.setFast();
+  }
+  if (V & FPFastMathModeAllowTransformMask) {
+    // AllowTransform requires the AllowContract and AllowReassoc bits to be
+    // set.
+    assert(FMF.allowContract() && FMF.allowReassoc() &&
+           "The FPFastMathMode AllowTransform requires AllowContract and "
+           "AllowReassoc to be set");
+  }
+
+  return FMF;
+}
+
+void SPIRVToLLVM::parseFloatControls2ExecutionModeId(SPIRVFunction *BF,
+                                                     Function *F) {
+
+  auto [Begin, End] =
+      BF->getExecutionModeRange(spv::ExecutionModeFPFastMathDefault);
+  if (Begin == End)
+    return;
+
+  LLVMContext &C = F->getContext();
+  NamedMDNode *ExecModeMD =
+      M->getOrInsertNamedMetadata(kSPIRVMD::ExecutionMode);
+
+  Metadata *FPFastMathMode[4] = {ConstantAsMetadata::get(F),
+                                 ConstantAsMetadata::get(getUInt32(
+                                     M, spv::ExecutionModeFPFastMathDefault)),
+                                 nullptr, nullptr};
+
+  for (auto [_, EM] : make_range(Begin, End)) {
+    const auto &Literals = EM->getLiterals();
+    assert(Literals.size() == 2);
+    SPIRVWord FloatTyId = Literals[0];
+    SPIRVType *FloatSPIRVType = BM->get<SPIRVType>(FloatTyId);
+    Type *FloatType = transFPType(FloatSPIRVType);
+    SPIRVWord Flags = *transIdAsConstant(Literals[1]);
+    FuncToFastMathFlags.try_emplace({F, FloatType},
+                                    translateFastMathFlags(Flags));
+
+    FPFastMathMode[2] = ConstantAsMetadata::get(PoisonValue::get(FloatType));
+    FPFastMathMode[3] = ConstantAsMetadata::get(getUInt32(M, Flags));
+    ExecModeMD->addOperand(MDNode::get(C, FPFastMathMode));
+  }
+}
+
 Function *SPIRVToLLVM::transFunction(SPIRVFunction *BF, unsigned AS) {
   auto Loc = FuncMap.find(BF);
   if (Loc != FuncMap.end())
@@ -3544,9 +3622,7 @@ Function *SPIRVToLLVM::transFunction(SPIRVFunction *BF, unsigned AS) {
       const auto &BFName = I.getFirst()->getName();
       if (BF->getName() == BFName) {
         auto *F = I.getSecond();
-        F->setCallingConv(
-            M->getTargetTriple().getVendor() == Triple::VendorType::AMD ?
-              CallingConv::AMDGPU_KERNEL : CallingConv::SPIR_KERNEL);
+        F->setCallingConv(CallingConv::SPIR_KERNEL);
         F->setLinkage(GlobalValue::ExternalLinkage);
         F->setDSOLocal(false);
         F = cast<Function>(mapValue(BF, F));
@@ -3589,6 +3665,22 @@ Function *SPIRVToLLVM::transFunction(SPIRVFunction *BF, unsigned AS) {
             ->getName();
   }
 
+  // The name mangling here is broken, as it'd have used the SPIR-V AS Map, so
+  // we have to fix it here and call the intrinsic.
+  // TODO: maybe handle memcpy_inline and memcpy_atomic.
+  if (M->getTargetTriple().isAMDGCN() &&
+      FuncNameRef.starts_with("spirv.llvm_memcpy_p")) {
+    Type *DstPtrTy = FT->getParamType(0);
+    Type *SrcPtrTy = FT->getParamType(1);
+    Type *SizeTy = FT->getParamType(2);
+    Function *F =
+        Intrinsic::getOrInsertDeclaration(M, Intrinsic::memcpy,
+                                          {DstPtrTy, SrcPtrTy, SizeTy});
+    F = cast<Function>(mapValue(BF, F));
+    mapFunction(BF, F);
+    return F;
+  }
+
   // Special handling for spirv.llvm_umul_with_overflow_* functions
   // These were created during forward translation by lowering intrinsics.
   // During reverse translation, we replace them with intrinsic calls.
@@ -3625,6 +3717,8 @@ Function *SPIRVToLLVM::transFunction(SPIRVFunction *BF, unsigned AS) {
     F->setCallingConv(IsKernel ? CallingConv::SPIR_KERNEL
                                : CallingConv::SPIR_FUNC);
   transFunctionAttrs(BF, F);
+
+  parseFloatControls2ExecutionModeId(BF, F);
 
   // Creating all basic blocks before creating instructions.
   for (size_t I = 0, E = BF->getNumBasicBlock(); I != E; ++I) {
@@ -3946,8 +4040,11 @@ Type *SPIRVToLLVM::getTypedPtrFromUntypedOperand(SPIRVValue *Val, Type *RetTy) {
       Ty = RetTy;
   }
 
+  StorageClass SC = Val->getType()->getPointerStorageClass();
   unsigned AddrSpace =
-      SPIRSPIRVAddrSpaceMap::rmap(Val->getType()->getPointerStorageClass());
+      (M->getTargetTriple().getVendor() == Triple::VendorType::AMD)
+          ? mapSPIRVAddrSpaceToAMDGPU(SC) : SPIRSPIRVAddrSpaceMap::rmap(SC);
+
   if (Ty)
     return TypedPointerType::get(Ty, AddrSpace);
 
@@ -5491,12 +5588,12 @@ bool SPIRVToLLVM::transAlign(SPIRVValue *BV, Value *V) {
   return true;
 }
 
-static Instruction *transLLVMFromExtInst(SPIRVToLLVM &Reader, OCLExtOpKind Op,
-                                         SPIRVExtInst *BC, Type *RetTy,
-                                         std::vector<Type *> ArgTys,
-                                         BasicBlock *BB) {
+Instruction *SPIRVToLLVM::transLLVMFromExtInst(SPIRVExtInst *BC, Type *RetTy,
+                                               std::vector<Type *> ArgTys,
+                                               BasicBlock *BB) {
   opaquifyTypedPointers(ArgTys);
 
+  auto Op = static_cast<OCLExtOpKind>(BC->getExtOp());
   Intrinsic::ID ID = Intrinsic::not_intrinsic;
   ArrayRef Formals(ArgTys);
   switch (Op) {
@@ -5684,7 +5781,7 @@ static Instruction *transLLVMFromExtInst(SPIRVToLLVM &Reader, OCLExtOpKind Op,
       F = Intrinsic::getOrInsertDeclaration(M, ID, Formals);
     }
 
-    auto Actuals = Reader.transValue(BC->getArgValues(), F, BB);
+    auto Actuals = transValue(BC->getArgValues(), F, BB);
 
     if (ID == Intrinsic::frexp) { // TODO: this should've been done in the FE.
       auto CI = CallInst::Create(F, {Actuals[0]}, BC->getName(), BB);
@@ -5699,7 +5796,6 @@ static Instruction *transLLVMFromExtInst(SPIRVToLLVM &Reader, OCLExtOpKind Op,
   CallInst *CI = CallInst::Create(F, Actuals, BC->getName(), BB);
   addFnAttr(CI, Attribute::NoUnwind);
   applyFPFastMathModeDecorations(BC, CI);
-  // CI->setFast(true);
 
   return CI;
 }
@@ -5713,28 +5809,28 @@ Instruction *SPIRVToLLVM::transOCLBuiltinFromExtInst(SPIRVExtInst *BC,
   assert(BM->getBuiltinSet(BC->getExtSetId()) == SPIRVEIS_OpenCL &&
          "Not OpenCL extended instruction");
 
-  Type *RetTy = transType(BC->getType());
-  std::vector<Type *> ArgTypes = transTypeVector(BC->getArgTypes(), true);
-
-  if (M->getTargetTriple().getVendor() == Triple::VendorType::AMD) {
-    for (unsigned I = 0; I < ArgTypes.size(); I++) {
-      // Special handling for "truly" untyped pointers to preserve correct OCL
-      // bultin mangling.
-      if (isa<PointerType>(ArgTypes[I]) &&
-          BC->getArgValue(I)->isUntypedVariable()) {
-        auto *BVar = static_cast<SPIRVUntypedVariableKHR *>(BC->getArgValue(I));
-        ArgTypes[I] = TypedPointerType::get(
-            transType(BVar->getDataType()),
-            (M->getTargetTriple().getVendor() == Triple::VendorType::AMD)
-                ? mapSPIRVAddrSpaceToAMDGPU(BVar->getStorageClass())
-                : SPIRSPIRVAddrSpaceMap::rmap(BVar->getStorageClass()));
-      }
+  if (ExtOp == OpenCLLIB::FMin_common || ExtOp == OpenCLLIB::FMax_common) {
+    if (BM->getDesiredBIsRepresentation() !=
+        BIsRepresentation::SPIRVFriendlyIR) {
+      // If the target environment is not SPIRVFriendlyIR, we need to lower the
+      // fmin_common/fmax_common to llvm.minnum/llvm.maxnum with the fast-math
+      // flags set appropiately.
+      IRBuilder<> IRB(BB);
+      Intrinsic::ID IntrinsicID = ExtOp == OpenCLLIB::FMin_common
+                                      ? Intrinsic::minnum
+                                      : Intrinsic::maxnum;
+      auto Args = transValue(BC->getArgValues(), BB->getParent(), BB);
+      FastMathFlags FMF;
+      FMF.setNoInfs();
+      FMF.setNoNaNs();
+      CallInst *MinMax = IRB.CreateIntrinsic(
+          IntrinsicID, {Args.front()->getType()}, Args, FMF);
+      return MinMax;
     }
-
-    return transLLVMFromExtInst(
-        *this, ExtOp, BC, RetTy, std::move(ArgTypes), BB);
   }
 
+  Type *RetTy = transType(BC->getType());
+  std::vector<Type *> ArgTypes = transTypeVector(BC->getArgTypes(), true);
   // Special handling for "truly" untyped pointers to preserve correct
   // OCL builtin mangling.
   unsigned PtrIdx = findFirstPtrType(ArgTypes);
@@ -5767,6 +5863,8 @@ Instruction *SPIRVToLLVM::transOCLBuiltinFromExtInst(SPIRVExtInst *BC,
     }
     }
   }
+  if (M->getTargetTriple().isAMDGCN())
+    return transLLVMFromExtInst(BC, RetTy, std::move(ArgTypes), BB);
 
   std::string MangledName =
       getSPIRVFriendlyIRFunctionName(ExtOp, ArgTypes, RetTy);
@@ -5814,6 +5912,10 @@ void SPIRVToLLVM::transAuxDataInst(SPIRVExtInst *BC) {
   case NonSemanticAuxData::FunctionAttribute:
   case NonSemanticAuxData::GlobalVariableAttribute: {
     assert(Args.size() < 4 && "Unexpected FunctionAttribute Args");
+    // Skip target-specific attributes so they won't conflict with attributes
+    // that can be set later during compilation.
+    if (AttrOrMDName == "target-features" || AttrOrMDName == "target-cpu")
+      return;
     // If this attr was specially handled and added elsewhere, skip it.
     Attribute::AttrKind AsKind = Attribute::getAttrKindFromName(AttrOrMDName);
     if (AsKind != Attribute::None)
@@ -5967,6 +6069,8 @@ SPIRVToLLVM::transLinkageType(const SPIRVValue *V) {
     return GlobalValue::ExternalLinkage;
   case LinkageTypeLinkOnceODR:
     return GlobalValue::LinkOnceODRLinkage;
+  case internal::LinkageTypeWeak:
+    return GlobalValue::WeakAnyLinkage;
   default:
     llvm_unreachable("Invalid linkage type");
   }

@@ -104,6 +104,8 @@ public:
                                      bool CreatePlaceHolder = true);
   bool transDecoration(SPIRVValue *, Value *);
   bool transAlign(SPIRVValue *, Value *);
+  Instruction *transLLVMFromExtInst(SPIRVExtInst *BC, Type *RetTy,
+                                    std::vector<Type *> ArgTys, BasicBlock *BB);
   Instruction *transOCLBuiltinFromExtInst(SPIRVExtInst *BC, BasicBlock *BB);
   void transAuxDataInst(SPIRVExtInst *BC);
   std::vector<Value *> transValue(const std::vector<SPIRVValue *> &,
@@ -274,6 +276,14 @@ private:
   void
   transFunctionPointerCallArgumentAttributes(SPIRVValue *BV, CallInst *CI,
                                              SPIRVTypeFunction *CalledFnTy);
+
+  using FunctionAndTypeIdPair = std::pair<Function *, Type *>;
+  using FunctionToFastMathFlagsMap =
+      DenseMap<FunctionAndTypeIdPair, FastMathFlags>;
+  FunctionToFastMathFlagsMap FuncToFastMathFlags;
+  FastMathFlags translateFastMathFlags(SPIRVWord V) const;
+  void parseFloatControls2ExecutionModeId(SPIRVFunction *BF, Function *F);
+  void applyFPFastMathModeDecorations(const SPIRVValue *BV, Instruction *Inst);
 }; // class SPIRVToLLVM
 
 } // namespace SPIRV
