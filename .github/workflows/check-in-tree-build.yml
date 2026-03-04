@@ -1,3 +1,7 @@
+# # AMD_CUSTOMIZATION: github actions are disabled
+# # the whole file must be updated to KhronosGroup's translator main if we
+# # enable it.
+
 # # This workflow is intended to check that in-tree build of the translator is
 # # healthy and all tests pass. It is used in pre-commits and nightly builds.
 # #
