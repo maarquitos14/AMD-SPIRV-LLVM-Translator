@@ -84,6 +84,7 @@
 #include "llvm/IR/TypedPointerType.h"
 #include "llvm/Pass.h"
 #include "llvm/Passes/PassBuilder.h"
+#include "llvm/Support/AMDGPUAddrSpace.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
@@ -455,9 +456,11 @@ SPIRVType *LLVMToSPIRVBase::transType(Type *T) {
     // SPIR-V 1.3 s3.32.6: Length is the number of elements in the array.
     //                     It must be at least 1.
     const auto ArraySize =
-        T->getArrayNumElements() ? T->getArrayNumElements() :
-            (M->getTargetTriple().getVendor() == Triple::VendorType::AMD
-              ? UINT64_MAX : 1);
+        T->getArrayNumElements()
+            ? T->getArrayNumElements()
+            : (M->getTargetTriple().getVendor() == Triple::VendorType::AMD
+                   ? UINT64_MAX
+                   : 1);
 
     Type *ElTy = T->getArrayElementType();
     SPIRVType *TransType = BM->addArrayType(
@@ -853,9 +856,10 @@ SPIRVType *LLVMToSPIRVBase::transScavengedType(Value *V) {
                                    SPIRVEC_UnsupportedVarArgFunction);
 
     SPIRVType *RT = transType(FnTy->getReturnType());
-    if (M->getTargetTriple().getVendor() == Triple::VendorType::AMD &&
-        F->hasName() && F->getName().contains("dispatch.ptr"))
-      RT = transType(PointerType::get(F->getContext(), SPIRAS_Constant));
+    if (M->getTargetTriple().getVendor() == Triple::VendorType::AMD)
+      if (F->getReturnType()->isPtrOrPtrVectorTy())
+        RT = transType(F->getReturnType()->getWithNewType(
+            PointerType::get(F->getContext(), SPIRAS_Constant)));
 
     std::vector<SPIRVType *> PT;
     for (Argument &Arg : F->args()) {
@@ -1604,8 +1608,7 @@ SPIRVInstruction *LLVMToSPIRVBase::transBinaryInst(BinaryOperator *B,
 SPIRVInstruction *LLVMToSPIRVBase::transCmpInst(CmpInst *Cmp,
                                                 SPIRVBasicBlock *BB) {
   auto *Op0 = Cmp->getOperand(0);
-  SPIRVValue *TOp0 =
-      transValue(Op0, BB, true, FuncTransMode::Pointer);
+  SPIRVValue *TOp0 = transValue(Op0, BB, true, FuncTransMode::Pointer);
   SPIRVValue *TOp1 =
       transValue(Cmp->getOperand(1), BB, true, FuncTransMode::Pointer);
   if (Op0->getType()->isPointerTy()) {
@@ -2411,9 +2414,9 @@ LLVMToSPIRVBase::transValueWithoutDecoration(Value *V, SPIRVBasicBlock *BB,
   if (AllocaInst *Alc = dyn_cast<AllocaInst>(V)) {
     SPIRVType *TranslatedTy =
         M->getTargetTriple().getVendor() != Triple::VendorType::AMD
-          ? transScavengedType(V)
-          : BM->addPointerType(StorageClassFunction,
-                               transType(Alc->getAllocatedType()));
+            ? transScavengedType(V)
+            : BM->addPointerType(StorageClassFunction,
+                                 transType(Alc->getAllocatedType()));
     if (Alc->isArrayAllocation()) {
       SPIRVValue *Length = transValue(Alc->getArraySize(), BB);
       assert(Length && "Couldn't translate array size!");
@@ -2787,8 +2790,8 @@ LLVMToSPIRVBase::transValueWithoutDecoration(Value *V, SPIRVBasicBlock *BB,
       auto WrapV = Ops.back();
       Ops.pop_back();
       auto IncDec = mapValue(V, BM->addInstTemplate(OC, Ops, BB, Ty));
-      IncDec->addDecorate(new SPIRVDecorate(DecorationMaxByteOffsetId, IncDec,
-                                            WrapV));
+      IncDec->addDecorate(
+          new SPIRVDecorate(DecorationMaxByteOffsetId, IncDec, WrapV));
       return IncDec;
       // TODO: figure out handling of saturating val.
     } else
@@ -4499,7 +4502,8 @@ SPIRVValue *LLVMToSPIRVBase::transIntrinsicInst(IntrinsicInst *II,
     SPIRVType *IntegralTy = transType(II->getType()->getStructElementType(1));
     // IntegralTy is the type of the result. We want to create a pointer to this
     // that we can pass to OpenCLLIB::modf to store the integral part.
-    SPIRVType *GenericPtrTy = BM->addPointerType(StorageClassFunction, IntegralTy);
+    SPIRVType *GenericPtrTy =
+        BM->addPointerType(StorageClassFunction, IntegralTy);
     auto *IntegralPtrTy = dyn_cast<SPIRVTypePointer>(GenericPtrTy);
     // We need to use the entry BB of the function calling llvm.modf.*, instead
     // of the current BB. For that, we'll find current BB's parent and get its
