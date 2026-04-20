@@ -5823,7 +5823,9 @@ Instruction *SPIRVToLLVM::transLLVMFromExtInst(SPIRVExtInst *BC, Type *RetTy,
       break;
     //   Hypot = 32,
     //   Ilogb = 33,
-    //   Ldexp = 34,
+    case OpenCLLIB::Ldexp:
+      ID = Intrinsic::ldexp;
+      break;
     //   Lgamma = 35,
     //   Lgamma_r = 36,
     case OpenCLLIB::Log:
