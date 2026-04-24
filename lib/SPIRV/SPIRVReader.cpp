@@ -2827,6 +2827,17 @@ Value *SPIRVToLLVM::transValueWithoutDecoration(SPIRVValue *BV, Function *F,
   case OpFunctionCall: {
     SPIRVFunctionCall *BC = static_cast<SPIRVFunctionCall *>(BV);
     std::vector<Value *> Args = transValue(BC->getArgumentValues(), F, BB);
+    if (M->getTargetTriple().isAMDGCN() && Args.size() == 1 &&
+        (BC->getFunction()->getName() == "llvm.amdgcn.is.shared" ||
+         BC->getFunction()->getName() == "llvm.amdgcn.is.private")) {
+      if (BC->getArgumentValues().front()->getType()->getPointerStorageClass()
+          != StorageClassGeneric) {
+        auto *PTy = PointerType::get(
+            F->getContext(), mapSPIRVAddrSpaceToAMDGPU(StorageClassGeneric));
+        Args[0] =
+            CastInst::CreatePointerBitCastOrAddrSpaceCast(Args[0], PTy, "", BB);
+      }
+    }
     auto *Call = CallInst::Create(transFunction(BC->getFunction()), Args,
                                   BC->getName(), BB);
     setCallingConv(Call);
