@@ -856,7 +856,10 @@ SPIRVType *LLVMToSPIRVBase::transScavengedType(Value *V) {
                                    SPIRVEC_UnsupportedVarArgFunction);
 
     SPIRVType *RT = transType(FnTy->getReturnType());
-    if (M->getTargetTriple().getVendor() == Triple::VendorType::AMD)
+    // TODO: Replace this AMD intrinsic-only rewrite to Constant AS with a
+    // generic handling of AS mismatches around `Constant`.
+    if (M->getTargetTriple().getVendor() == Triple::VendorType::AMD &&
+        F->isIntrinsic())
       if (F->getReturnType()->isPtrOrPtrVectorTy())
         RT = transType(F->getReturnType()->getWithNewType(
             PointerType::get(F->getContext(), SPIRAS_Constant)));
