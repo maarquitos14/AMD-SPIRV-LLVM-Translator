@@ -252,7 +252,8 @@ void LLVMToSPIRVDbgTran::transLocationInfo() {
               BM->getDebugInfoEIS() ==
                   SPIRVEIS_NonSemantic_Shader_DebugInfo_200)
             BM->addDebugLine(V, getVoidTy(),
-                             File ? File->getId() : getDebugInfoNoneId(),
+                             File ? getSource(DL.get())->getId()
+                                  : getDebugInfoNoneId(),
                              LineNo, LineNo, Col, Col + 1);
           else
             BM->addLine(V, File ? File->getId() : getDebugInfoNoneId(), LineNo,
@@ -1259,7 +1260,14 @@ SPIRVEntry *LLVMToSPIRVDbgTran::transDbgFunction(const DISubprogram *Func) {
   Ops[LineIdx] = Func->getLine();
   Ops[ColumnIdx] = 0; // This version of DISubprogram has no column number
   auto *Scope = Func->getScope();
-  if (Scope && !isa<DIFile>(Scope)) {
+  // NonSemantic.Shader.DebugInfo requires DebugFunction Parent to be a
+  // lexical scope: DebugCompilationUnit, DebugFunction, DebugLexicalBlock or
+  // DebugTypeComposite.
+  // DebugModule (introduced in .200) is not a lexical scope, so fall back to
+  // the compile unit when the DISubprogram is scoped inside a DIModule.
+  bool ScopeIsLexical = Scope && !isa<DIFile>(Scope) &&
+                        !(isNonSemanticDebugInfo() && isa<DIModule>(Scope));
+  if (ScopeIsLexical) {
     Ops[ParentIdx] = getScope(Scope)->getId();
   } else {
     if (auto *Unit = Func->getUnit())
