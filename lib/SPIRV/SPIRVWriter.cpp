@@ -416,6 +416,16 @@ SPIRVType *LLVMToSPIRVBase::transType(Type *T) {
   if (T->isFloatingPointTy())
     return mapType(T, BM->addFloatType(T->getPrimitiveSizeInBits()));
 
+  if (T->isTokenTy()) {
+    BM->getErrorLog().checkError(
+        BM->isAllowedToUseExtension(ExtensionID::SPV_INTEL_token_type),
+        SPIRVEC_RequiresExtension,
+        "SPV_INTEL_token_type\n"
+        "NOTE: LLVM module contains token type, which doesn't have analogs in "
+        "SPIR-V without extensions");
+    return mapType(T, BM->addTokenTypeINTEL());
+  }
+
   // A pointer to image or pipe type in LLVM is translated to a SPIRV
   // (non-pointer) image or pipe type.
   if (T->isPointerTy()) {
@@ -619,14 +629,6 @@ SPIRVType *LLVMToSPIRVBase::transType(Type *T) {
         return mapType(T, BM->addOpaqueGenericType(Opcode));
       }
     }
-  }
-
-  if (T->isTokenTy()) {
-    BM->getErrorLog().checkError(
-        false, SPIRVEC_InvalidModule,
-        "LLVM module contains token type, which doesn't have a counterpart in "
-        "SPIR-V");
-    return nullptr;
   }
 
   llvm_unreachable("Not implemented!");
@@ -4169,6 +4171,7 @@ bool LLVMToSPIRVBase::isKnownIntrinsic(Intrinsic::ID Id) {
   case Intrinsic::cos:
   case Intrinsic::exp:
   case Intrinsic::exp2:
+  case Intrinsic::exp10:
   case Intrinsic::fabs:
   case Intrinsic::floor:
   case Intrinsic::fma:
@@ -4297,6 +4300,8 @@ static SPIRVWord getBuiltinIdForIntrinsic(Intrinsic::ID IID) {
     return OpenCLLIB::Exp;
   case Intrinsic::exp2:
     return OpenCLLIB::Exp2;
+  case Intrinsic::exp10:
+    return OpenCLLIB::Exp10;
   case Intrinsic::fabs:
     return OpenCLLIB::Fabs;
   case Intrinsic::floor:
@@ -4361,6 +4366,8 @@ static SPIRVWord getNativeBuiltinIdForIntrinsic(Intrinsic::ID IID) {
     return OpenCLLIB::Native_exp;
   case Intrinsic::exp2:
     return OpenCLLIB::Native_exp2;
+  case Intrinsic::exp10:
+    return OpenCLLIB::Native_exp10;
   case Intrinsic::log:
     return OpenCLLIB::Native_log;
   case Intrinsic::log10:
@@ -4499,6 +4506,7 @@ SPIRVValue *LLVMToSPIRVBase::transIntrinsicInst(IntrinsicInst *II,
   case Intrinsic::cosh:
   case Intrinsic::exp:
   case Intrinsic::exp2:
+  case Intrinsic::exp10:
   case Intrinsic::fabs:
   case Intrinsic::floor:
   case Intrinsic::log:
@@ -5072,7 +5080,7 @@ SPIRVValue *LLVMToSPIRVBase::transIntrinsicInst(IntrinsicInst *II,
       std::vector<SPIRVValue *> Elts(TNumElts, transValue(Val, BB));
       Init = BM->addCompositeConstant(CompositeTy, Elts);
     }
-    SPIRVType *VarTy = transPointerType(AT, SPIRV::SPIRAS_Private);
+    SPIRVType *VarTy = transPointerType(AT, SPIRAS_Private);
     SPIRVBasicBlock *EntryBB = BB->getParent()->getBasicBlock(0);
     SPIRVValue *Var = BM->addVariable(VarTy, nullptr, /*isConstant*/ false,
                                       spv::internal::LinkageTypeInternal, Init,
@@ -5081,8 +5089,7 @@ SPIRVValue *LLVMToSPIRVBase::transIntrinsicInst(IntrinsicInst *II,
         MSI, BM->isAllowedToUseVersion(VersionNumber::SPIRV_1_4));
     if (!MemAccess.empty() && MemAccess[0] == MemoryAccessAlignedMask)
       Var->setAlignment(MemAccess[1]);
-    SPIRVType *SourceTy =
-        transPointerType(Val->getType(), SPIRV::SPIRAS_Private);
+    SPIRVType *SourceTy = transPointerType(Val->getType(), SPIRAS_Private);
     SPIRVValue *Source = BM->addUnaryInst(OpBitcast, SourceTy, Var, BB);
     SPIRVValue *Target = transValue(MSI->getRawDest(), BB);
     return BM->addCopyMemorySizedInst(Target, Source, CompositeTy->getLength(),
@@ -5806,6 +5813,21 @@ SPIRVValue *LLVMToSPIRVBase::transDirectCallInst(CallInst *CI,
     if (SPIRV::FPConvertToEncodingMap::find(DemangledName)) {
       FPConversionDesc FPDesc =
           SPIRV::FPConvertToEncodingMap::map(DemangledName);
+      // SPV_EXT_float8: when SPV_EXT_float8 is enabled and
+      // SPV_INTEL_fp_conversions is not, the
+      // ClampConvert<Src>To<E4M3|E5M2>INTEL builtin maps to OpFConvert
+      // decorated with SaturatedToLargestFloat8NormalConversionEXT instead of
+      // the SPV_INTEL_fp_conversions OpClampConvertFToFINTEL opcode. When both
+      // extensions are enabled, SPV_INTEL_fp_conversions wins to preserve the
+      // pre-existing encoding.
+      bool IsSaturatedFP8 =
+          FPDesc.ConvOpCode == internal::OpClampConvertFToFINTEL &&
+          (FPDesc.DstEncoding == FPEncodingWrap::E4M3 ||
+           FPDesc.DstEncoding == FPEncodingWrap::E5M2) &&
+          BM->isAllowedToUseExtension(ExtensionID::SPV_EXT_float8) &&
+          !BM->isAllowedToUseExtension(ExtensionID::SPV_INTEL_fp_conversions);
+      if (IsSaturatedFP8)
+        FPDesc.ConvOpCode = OpFConvert;
       Value *Src = CI->getOperand(0);
       Type *LLVMSrcTy = Src->getType();
       Type *LLVMDstTy = CI->getType();
@@ -5883,6 +5905,10 @@ SPIRVValue *LLVMToSPIRVBase::transDirectCallInst(CallInst *CI,
         Ops.push_back(transValue(CI->getOperand(I), BB));
 
       SPIRVValue *Conv = BM->addInstTemplate(OC, BM->getIds(Ops), BB, DstTy);
+
+      if (IsSaturatedFP8)
+        Conv->addDecorate(new SPIRVDecorate(
+            DecorationSaturatedToLargestFloat8NormalConversionEXT, Conv));
 
       // Representable in LLVM FP types: bitcast is not needed.
       if (FPDesc.DstEncoding == FPEncodingWrap::IEEE754 ||

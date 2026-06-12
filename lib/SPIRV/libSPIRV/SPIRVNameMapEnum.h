@@ -93,6 +93,8 @@ template <> inline void SPIRVMap<Decoration, std::string>::init() {
   add(DecorationUniform, "Uniform");
   add(DecorationUniformId, "UniformId");
   add(DecorationSaturatedConversion, "SaturatedConversion");
+  add(DecorationSaturatedToLargestFloat8NormalConversionEXT,
+      "SaturatedToLargestFloat8NormalConversionEXT");
   add(DecorationStream, "Stream");
   add(DecorationLocation, "Location");
   add(DecorationComponent, "Component");
@@ -630,6 +632,7 @@ template <> inline void SPIRVMap<Capability, std::string>::init() {
   add(CapabilityLongCompositesINTEL, "LongCompositesINTEL");
   add(CapabilityOptNoneEXT, "OptNoneEXT");
   add(CapabilityAtomicFloat16AddEXT, "AtomicFloat16AddEXT");
+  add(CapabilityAtomicFloat16VectorNV, "AtomicFloat16VectorNV");
   add(internal::CapabilityAtomicBFloat16AddINTEL, "AtomicBFloat16AddINTEL");
   add(internal::CapabilityAtomicBFloat16MinMaxINTEL,
       "AtomicBFloat16MinMaxINTEL");
