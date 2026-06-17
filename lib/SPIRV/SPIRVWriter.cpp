@@ -2188,15 +2188,23 @@ LLVMToSPIRVBase::transValueWithoutDecoration(Value *V, SPIRVBasicBlock *BB,
     }
     if (isa_and_nonnull<ConstantExpr>(Init)) {
       BVarInit = transValue(Init, nullptr);
-    } else if (ST && isa<UndefValue>(Init)) {
-      // Undef initializer for LLVM structure be can translated to
+    } else if (isa_and_nonnull<UndefValue>(Init) &&
+               Init->getType()->isAggregateType()) {
+      // Undef initializer for LLVM struct or array can be translated to
       // OpConstantComposite with OpUndef constituents.
       auto I = ValueMap.find(Init);
       if (I == ValueMap.end()) {
+        Type *AggTy = Init->getType();
         std::vector<SPIRVValue *> Elements;
-        for (Type *E : ST->elements())
-          Elements.push_back(transValue(UndefValue::get(E), nullptr));
-        BVarInit = BM->addCompositeConstant(transType(ST), Elements);
+        if (auto *ArrTy = dyn_cast<ArrayType>(AggTy)) {
+          SPIRVValue *EltUndef =
+              transValue(UndefValue::get(ArrTy->getElementType()), nullptr);
+          Elements.assign(ArrTy->getNumElements(), EltUndef);
+        } else {
+          for (Type *E : cast<StructType>(AggTy)->elements())
+            Elements.emplace_back(transValue(UndefValue::get(E), nullptr));
+        }
+        BVarInit = BM->addCompositeConstant(transType(AggTy), Elements);
         ValueMap[Init] = BVarInit;
       } else
         BVarInit = I->second;
@@ -4751,36 +4759,43 @@ SPIRVValue *LLVMToSPIRVBase::transIntrinsicInst(IntrinsicInst *II,
     return Value;
   }
   case Intrinsic::experimental_constrained_fadd: {
-    auto *BI = BM->addBinaryInst(OpFAdd, transType(II->getType()),
-                                 transValue(II->getArgOperand(0), BB),
-                                 transValue(II->getArgOperand(1), BB), BB);
-    return applyRoundingModeConstraint(II->getOperand(2), BI);
+    SPIRVDBG(dbgs() << "WARNING: Rounding Mode of constrained intrinsic "
+                       "\"fadd\" not supported by SPIR-V, dropping it.\n");
+    return BM->addBinaryInst(OpFAdd, transType(II->getType()),
+                             transValue(II->getArgOperand(0), BB),
+                             transValue(II->getArgOperand(1), BB), BB);
   }
   case Intrinsic::experimental_constrained_fsub: {
-    auto *BI = BM->addBinaryInst(OpFSub, transType(II->getType()),
-                                 transValue(II->getArgOperand(0), BB),
-                                 transValue(II->getArgOperand(1), BB), BB);
-    return applyRoundingModeConstraint(II->getOperand(2), BI);
+    SPIRVDBG(dbgs() << "WARNING: Rounding Mode of constrained intrinsic "
+                       "\"fsub\" not supported by SPIR-V, dropping it.\n");
+    return BM->addBinaryInst(OpFSub, transType(II->getType()),
+                             transValue(II->getArgOperand(0), BB),
+                             transValue(II->getArgOperand(1), BB), BB);
   }
   case Intrinsic::experimental_constrained_fmul: {
-    auto *BI = BM->addBinaryInst(OpFMul, transType(II->getType()),
-                                 transValue(II->getArgOperand(0), BB),
-                                 transValue(II->getArgOperand(1), BB), BB);
-    return applyRoundingModeConstraint(II->getOperand(2), BI);
+    SPIRVDBG(dbgs() << "WARNING: Rounding Mode of constrained intrinsic "
+                       "\"fmul\" not supported by SPIR-V, dropping it.\n");
+    return BM->addBinaryInst(OpFMul, transType(II->getType()),
+                             transValue(II->getArgOperand(0), BB),
+                             transValue(II->getArgOperand(1), BB), BB);
   }
   case Intrinsic::experimental_constrained_fdiv: {
-    auto *BI = BM->addBinaryInst(OpFDiv, transType(II->getType()),
-                                 transValue(II->getArgOperand(0), BB),
-                                 transValue(II->getArgOperand(1), BB), BB);
-    return applyRoundingModeConstraint(II->getOperand(2), BI);
+    SPIRVDBG(dbgs() << "WARNING: Rounding Mode of constrained intrinsic "
+                       "\"fdiv\" not supported by SPIR-V, dropping it.\n");
+    return BM->addBinaryInst(OpFDiv, transType(II->getType()),
+                             transValue(II->getArgOperand(0), BB),
+                             transValue(II->getArgOperand(1), BB), BB);
   }
   case Intrinsic::experimental_constrained_frem: {
-    auto *BI = BM->addBinaryInst(OpFRem, transType(II->getType()),
-                                 transValue(II->getArgOperand(0), BB),
-                                 transValue(II->getArgOperand(1), BB), BB);
-    return applyRoundingModeConstraint(II->getOperand(2), BI);
+    SPIRVDBG(dbgs() << "WARNING: Rounding Mode of constrained intrinsic "
+                       "\"frem\" not supported by SPIR-V, dropping it.\n");
+    return BM->addBinaryInst(OpFRem, transType(II->getType()),
+                             transValue(II->getArgOperand(0), BB),
+                             transValue(II->getArgOperand(1), BB), BB);
   }
   case Intrinsic::experimental_constrained_fma: {
+    SPIRVDBG(dbgs() << "WARNING: Rounding Mode of constrained intrinsic "
+                       "\"fma\" not supported by SPIR-V, dropping it.\n");
     std::vector<SPIRVValue *> Args{transValue(II->getArgOperand(0), BB),
                                    transValue(II->getArgOperand(1), BB),
                                    transValue(II->getArgOperand(2), BB)};
@@ -4792,7 +4807,7 @@ SPIRVValue *LLVMToSPIRVBase::transIntrinsicInst(IntrinsicInst *II,
       BI = BM->addExtInst(transType(II->getType()),
                           BM->getExtInstSetId(SPIRVEIS_OpenCL), OpenCLLIB::Fma,
                           Args, BB);
-    return applyRoundingModeConstraint(II->getOperand(3), BI);
+    return BI;
   }
   case Intrinsic::experimental_constrained_fptoui: {
     return BM->addUnaryInst(OpConvertFToU, transType(II->getType()),
@@ -4846,13 +4861,14 @@ SPIRVValue *LLVMToSPIRVBase::transIntrinsicInst(IntrinsicInst *II,
                           transValue(II->getOperand(1), BB), BB);
   }
   case Intrinsic::experimental_constrained_fmuladd: {
+    SPIRVDBG(dbgs() << "WARNING: Rounding Mode of constrained intrinsic "
+                       "\"fmuladd\" not supported by SPIR-V, dropping it.\n");
     SPIRVType *Ty = transType(II->getType());
     SPIRVValue *Mul =
         BM->addBinaryInst(OpFMul, Ty, transValue(II->getArgOperand(0), BB),
                           transValue(II->getArgOperand(1), BB), BB);
-    auto *BI = BM->addBinaryInst(OpFAdd, Ty, Mul,
-                                 transValue(II->getArgOperand(2), BB), BB);
-    return applyRoundingModeConstraint(II->getOperand(3), BI);
+    return BM->addBinaryInst(OpFAdd, Ty, Mul,
+                             transValue(II->getArgOperand(2), BB), BB);
   }
   case Intrinsic::fmuladd: {
     // For llvm.fmuladd.* fusion is not guaranteed. If a fused multiply-add
