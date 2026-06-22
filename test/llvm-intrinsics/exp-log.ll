@@ -1,14 +1,7 @@
-; Round-trip coverage for OpenCL ExtInst Exp/Exp2/Exp10/Log/Log2/Log10
-; through the AMDGCN reverse-translation path
-; (SPIRVToLLVM::transLLVMFromExtInst). Before adding the missing case
-; arms in SPIRVReader.cpp, reverse translation of any SPIR-V binary
-; using Exp2 (op 20), Exp10 (op 21), Log2 (op 38) or Log10 (op 39)
-; aborted with "Failed to handle OpenCL Extended Op: <op>" whenever the
-; target module triple was AMDGCN.
+; Check round-trip coverage for all Exp and Log OpenCL ExtInst.
 
 ; RUN: llvm-as %s -o %t.bc
-; RUN: llvm-spirv %t.bc -spirv-text -o %t.spt
-; RUN: FileCheck < %t.spt %s --check-prefix=CHECK-SPIRV
+; RUN: llvm-spirv %t.bc -spirv-text -o - | FileCheck %s --check-prefix=CHECK-SPIRV
 ; RUN: llvm-spirv %t.bc -o %t.spv
 ; RUN: llvm-spirv -r %t.spv -o %t.rev.bc
 ; RUN: llvm-dis %t.rev.bc -o - | FileCheck %s --check-prefix=CHECK-LLVM
@@ -19,7 +12,7 @@ target triple = "spirv64-amd-amdhsa"
 ; CHECK-SPIRV: ExtInstImport [[#ExtInstSetId:]] "OpenCL.std"
 ; CHECK-SPIRV: TypeFloat [[#TypeFloat:]] 32
 
-; CHECK-SPIRV: ExtInst [[#TypeFloat]] {{[0-9]+}} [[#ExtInstSetId]] exp {{[0-9]+}}
+; CHECK-SPIRV: ExtInst [[#TypeFloat]] [[#]] [[#ExtInstSetId]] exp [[#]]
 ; CHECK-LLVM: call float @llvm.exp.f32(
 define spir_func float @TestExp(float %x) {
 entry:
@@ -27,7 +20,7 @@ entry:
   ret float %r
 }
 
-; CHECK-SPIRV: ExtInst [[#TypeFloat]] {{[0-9]+}} [[#ExtInstSetId]] exp2 {{[0-9]+}}
+; CHECK-SPIRV: ExtInst [[#TypeFloat]] [[#]] [[#ExtInstSetId]] exp2 [[#]]
 ; CHECK-LLVM: call float @llvm.exp2.f32(
 define spir_func float @TestExp2(float %x) {
 entry:
@@ -35,7 +28,7 @@ entry:
   ret float %r
 }
 
-; CHECK-SPIRV: ExtInst [[#TypeFloat]] {{[0-9]+}} [[#ExtInstSetId]] exp10 {{[0-9]+}}
+; CHECK-SPIRV: ExtInst [[#TypeFloat]] [[#]] [[#ExtInstSetId]] exp10 [[#]]
 ; CHECK-LLVM: call float @llvm.exp10.f32(
 define spir_func float @TestExp10(float %x) {
 entry:
@@ -43,7 +36,7 @@ entry:
   ret float %r
 }
 
-; CHECK-SPIRV: ExtInst [[#TypeFloat]] {{[0-9]+}} [[#ExtInstSetId]] log {{[0-9]+}}
+; CHECK-SPIRV: ExtInst [[#TypeFloat]] [[#]] [[#ExtInstSetId]] log [[#]]
 ; CHECK-LLVM: call float @llvm.log.f32(
 define spir_func float @TestLog(float %x) {
 entry:
@@ -51,7 +44,7 @@ entry:
   ret float %r
 }
 
-; CHECK-SPIRV: ExtInst [[#TypeFloat]] {{[0-9]+}} [[#ExtInstSetId]] log2 {{[0-9]+}}
+; CHECK-SPIRV: ExtInst [[#TypeFloat]] [[#]] [[#ExtInstSetId]] log2 [[#]]
 ; CHECK-LLVM: call float @llvm.log2.f32(
 define spir_func float @TestLog2(float %x) {
 entry:
@@ -59,7 +52,7 @@ entry:
   ret float %r
 }
 
-; CHECK-SPIRV: ExtInst [[#TypeFloat]] {{[0-9]+}} [[#ExtInstSetId]] log10 {{[0-9]+}}
+; CHECK-SPIRV: ExtInst [[#TypeFloat]] [[#]] [[#ExtInstSetId]] log10 [[#]]
 ; CHECK-LLVM: call float @llvm.log10.f32(
 define spir_func float @TestLog10(float %x) {
 entry:
