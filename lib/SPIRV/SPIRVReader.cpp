@@ -6048,11 +6048,20 @@ Instruction *SPIRVToLLVM::transLLVMFromExtInst(SPIRVExtInst *BC, Type *RetTy,
     //   Erfc = 17,
     //   Erf = 18,
     case OpenCLLIB::Exp:
+    case OpenCLLIB::Half_exp:
     case OpenCLLIB::Native_exp:
       ID = Intrinsic::exp;
       break;
-    //   Exp2 = 20,
-    //   Exp10 = 21,
+    case OpenCLLIB::Exp2:
+    case OpenCLLIB::Half_exp2:
+    case OpenCLLIB::Native_exp2:
+      ID = Intrinsic::exp2;
+      break;
+    case OpenCLLIB::Exp10:
+    case OpenCLLIB::Half_exp10:
+    case OpenCLLIB::Native_exp10:
+      ID = Intrinsic::exp10;
+      break;
     //   Expm1 = 22,
     case OpenCLLIB::Fabs: ID =
       Intrinsic::fabs;
@@ -6086,13 +6095,18 @@ Instruction *SPIRVToLLVM::transLLVMFromExtInst(SPIRVExtInst *BC, Type *RetTy,
     //   Lgamma = 35,
     //   Lgamma_r = 36,
     case OpenCLLIB::Log:
+    case OpenCLLIB::Half_log:
     case OpenCLLIB::Native_log:
       ID = Intrinsic::log;
       break;
     case OpenCLLIB::Log2:
+    case OpenCLLIB::Half_log2:
+    case OpenCLLIB::Native_log2:
       ID = Intrinsic::log2;
       break;
     case OpenCLLIB::Log10:
+    case OpenCLLIB::Half_log10:
+    case OpenCLLIB::Native_log10:
       ID = Intrinsic::log10;
       break;
     //   Log1p = 40,
