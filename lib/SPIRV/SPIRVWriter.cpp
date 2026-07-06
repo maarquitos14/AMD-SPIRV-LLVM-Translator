@@ -2057,6 +2057,18 @@ LLVMToSPIRVBase::getLoopControl(const Instruction *Branch,
   return static_cast<spv::LoopControlMask>(LoopControl);
 }
 
+static void addAMDGPUAtomicDecorations(Instruction *Src, SPIRVValue *Dst,
+                                       const Module *M) {
+  if (M->getTargetTriple().getVendor() != Triple::VendorType::AMD)
+    return;
+  for (auto &&MD : {"amdgpu.no.fine.grained.memory",
+                    "amdgpu.no.remote.memory",
+                    "amdgpu.ignore.denormal.mode"}) {
+    if (Src->hasMetadata(MD))
+      Dst->addDecorate(new SPIRVDecorateUserSemanticAttr(Dst, MD));
+  }
+}
+
 static int transAtomicOrdering(llvm::AtomicOrdering Ordering) {
   return OCLMemOrderMap::map(
       static_cast<OCLMemOrderKind>(llvm::toCABI(Ordering)));
@@ -2878,12 +2890,15 @@ LLVMToSPIRVBase::transValueWithoutDecoration(Value *V, SPIRVBasicBlock *BB,
       auto IncDec = mapValue(V, BM->addInstTemplate(OC, Ops, BB, Ty));
       IncDec->addDecorate(
           new SPIRVDecorate(DecorationMaxByteOffsetId, IncDec, WrapV));
+      addAMDGPUAtomicDecorations(ARMW, IncDec, M);
       return IncDec;
       // TODO: figure out handling of saturating val.
     } else
       OC = LLVMSPIRVAtomicRmwOpCodeMap::map(Op);
 
-    return mapValue(V, BM->addInstTemplate(OC, Ops, BB, Ty));
+    auto Result = mapValue(V, BM->addInstTemplate(OC, Ops, BB, Ty));
+    addAMDGPUAtomicDecorations(ARMW, Result, M);
+    return Result;
   }
 
   if (IntrinsicInst *II = dyn_cast<IntrinsicInst>(V)) {
@@ -6674,6 +6689,8 @@ SPIRVInstruction *LLVMToSPIRVBase::transBuiltinToInst(StringRef DemangledName,
 
   auto *Inst = transBuiltinToInstWithoutDecoration(OC, CI, BB);
   addDecorations(Inst, Dec);
+  if (Inst && isAtomicOpCode(OC))
+    addAMDGPUAtomicDecorations(CI, Inst, M);
   return Inst;
 }
 

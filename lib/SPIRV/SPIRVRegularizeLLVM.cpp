@@ -870,6 +870,12 @@ bool SPIRVRegularizeLLVMBase::regularize() {
           auto *Res =
               addCallInstSPIRV(M, "__spirv_AtomicCompareExchange", MemType,
                                Args, nullptr, {MemType}, &II, "cmpxchg.res");
+          for (auto &&MD : {"amdgpu.no.fine.grained.memory",
+                            "amdgpu.no.remote.memory",
+                            "amdgpu.ignore.denormal.mode"}) {
+            if (auto *N = Cmpxchg->getMetadata(MD))
+              cast<Instruction>(Res)->setMetadata(MD, N);
+          }
           IRBuilder<> Builder(Cmpxchg);
           auto *Cmp = Builder.CreateICmpEQ(Res, Comparator, "cmpxchg.success");
           auto *V1 = Builder.CreateInsertValue(
