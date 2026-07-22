@@ -1,0 +1,88 @@
+; Test that feature predicate spec constants resolve correctly when a variable
+; whose initializer references a kernel (e.g. __clang_gpu_used_external from
+; multi-TU linking) appears before llvm.amdgcn.feature.predicate.ids.
+
+; RUN: llvm-spirv -to-binary -o %t.spv %s
+; RUN: llvm-spirv -r --spirv-target-env=CL2.0 %t.spv -o %t.bc
+; RUN: llvm-dis %t.bc -o - | FileCheck %s
+
+; CHECK-LABEL: define {{.*}} @kernel
+; CHECK-NOT: br i1 false
+; CHECK: call void @real_barrier
+; CHECK-NOT: call {{.*}}barrier_missing
+
+119734787 67072 65535 50 0
+2 Capability Linkage
+2 Capability Kernel
+2 Capability Int64
+5 ExtInstImport 1 "OpenCL.std"
+3 MemoryModel 2 2
+9 Name 10 "__clang_gpu_used_external"
+11 Name 20 "llvm.amdgcn.feature.predicate.ids"
+4 Name 30 "kernel"
+6 Name 40 "barrier_missing"
+6 Name 41 "real_barrier"
+
+4 Decorate 25 SpecId 0
+11 Decorate 10 LinkageAttributes "__clang_gpu_used_external" Export
+3 Decorate 10 Constant
+13 Decorate 20 LinkageAttributes "llvm.amdgcn.feature.predicate.ids" Export
+3 Decorate 20 Constant
+6 Decorate 30 LinkageAttributes "kernel" Export
+
+4 TypeInt 2 64 0
+4 TypeInt 4 8 0
+2 TypeVoid 5
+3 TypeFunction 6 5
+2 TypeBool 7
+5 Constant 2 8 7 0
+4 Constant 4 42 104
+4 Constant 4 43 97
+4 Constant 4 44 115
+4 Constant 4 45 46
+4 Constant 4 46 32
+4 Constant 4 47 48
+4 Constant 4 48 0
+
+; ConvertPtrToU(@kernel) — triggers function translation when transValue'd
+5 SpecConstantOp 2 15 124 30
+
+4 TypeInt 3 32 0
+4 Constant 3 49 1
+4 TypeArray 9 4 8
+4 TypeArray 11 2 49
+4 TypePointer 12 5 9
+4 TypePointer 13 5 11
+
+; __clang_gpu_used_external BEFORE predicate map — this ordering triggers the bug
+4 SpecConstantComposite 11 16 15
+5 Variable 13 10 5 16
+
+; Predicate map: "has. 0\0"
+10 ConstantComposite 9 19 42 43 44 45 46 47 48
+5 Variable 12 20 5 19
+
+3 SpecConstantFalse 7 25
+
+5 Function 5 40 0 6
+2 Label 35
+1 Return
+1 FunctionEnd
+
+5 Function 5 41 0 6
+2 Label 36
+1 Return
+1 FunctionEnd
+
+5 Function 5 30 0 6
+2 Label 31
+4 BranchConditional 25 32 33
+2 Label 32
+4 FunctionCall 5 37 41
+2 Branch 34
+2 Label 33
+4 FunctionCall 5 38 40
+2 Branch 34
+2 Label 34
+1 Return
+1 FunctionEnd

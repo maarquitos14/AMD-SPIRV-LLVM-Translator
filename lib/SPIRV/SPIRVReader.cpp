@@ -4585,14 +4585,25 @@ bool SPIRVToLLVM::translate() {
       DbgTran->transDebugInst(EI);
   }
 
+  // Populate the feature predicate map before translating any variables,
+  // because variable translation can recursively trigger function translation
+  // (e.g. via __clang_gpu_used_external), which may reference spec constants
+  // that depend on the predicate map.
+  if (M->getTargetTriple().isAMDGCN()) {
+    for (unsigned I = 0, E = BM->getNumVariables(); I != E; ++I) {
+      auto *BV = BM->getVariable(I);
+      if (BV->getStorageClass() != StorageClassFunction &&
+          BV->getName() == "llvm.amdgcn.feature.predicate.ids") {
+        addFeaturePredicateMap(BV->getInitializer());
+        break;
+      }
+    }
+  }
+
   for (unsigned I = 0, E = BM->getNumVariables(); I != E; ++I) {
     auto *BV = BM->getVariable(I);
     if (BV->getStorageClass() != StorageClassFunction) {
-      // The feature predicate map is just a helper, we never emit it.
-      if (M->getTargetTriple().isAMDGCN() &&
-          BV->getName() == "llvm.amdgcn.feature.predicate.ids")
-        addFeaturePredicateMap(BV->getInitializer());
-      else
+      if (BV->getName() != "llvm.amdgcn.feature.predicate.ids")
         transValue(BV, nullptr, nullptr);
     }
     transGlobalCtorDtors(BV);
