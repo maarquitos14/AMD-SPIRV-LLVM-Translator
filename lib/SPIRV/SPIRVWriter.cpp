@@ -439,6 +439,20 @@ SPIRVType *LLVMToSPIRVBase::transType(Type *T) {
   }
 
   if (auto *VecTy = dyn_cast<FixedVectorType>(T)) {
+    unsigned NumElements = VecTy->getNumElements();
+    bool IsNonStandardCount =
+        !(NumElements == 2 || NumElements == 3 || NumElements == 4 ||
+          NumElements == 8 || NumElements == 16);
+    if (IsNonStandardCount &&
+        !BM->isAllowedToUseExtension(ExtensionID::SPV_EXT_long_vector) &&
+        !BM->isAllowedToUseExtension(ExtensionID::SPV_INTEL_vector_compute)) {
+      BM->getErrorLog().checkError(
+          false, SPIRVEC_RequiresExtension,
+          "SPV_EXT_long_vector or SPV_INTEL_vector_compute\n"
+          "NOTE: LLVM module contains a vector with an unsupported number of "
+          "components, translation of which requires one of these extensions");
+      return nullptr;
+    }
     if (VecTy->getElementType()->isPointerTy() ||
         isa<TypedPointerType>(VecTy->getElementType())) {
       // SPV_INTEL_masked_gather_scatter extension changes 2.16.1. Universal
@@ -965,11 +979,14 @@ SPIRVFunction *LLVMToSPIRVBase::transFunctionDecl(Function *F) {
       // generation.
       if (!BM->isAllowedToUseExtension(ExtensionID::SPV_EXT_float8) &&
           !BM->isAllowedToUseExtension(ExtensionID::SPV_INTEL_int4) &&
-          !BM->isAllowedToUseExtension(ExtensionID::SPV_INTEL_float4)) {
-        std::string ErrorStr = "One of the following extensions: "
-                               "SPV_EXT_float8, SPV_INTEL_float4, "
-                               "SPV_INTEL_int4 should be enabled to process "
-                               "conversion builtins";
+          !BM->isAllowedToUseExtension(ExtensionID::SPV_INTEL_float4) &&
+          !BM->isAllowedToUseExtension(
+              ExtensionID::SPV_EXT_ocp_microscaling_types)) {
+        std::string ErrorStr =
+            "One of the following extensions: "
+            "SPV_EXT_float8, SPV_EXT_ocp_microscaling_types, "
+            "SPV_INTEL_float4, SPV_INTEL_int4 should be enabled to process "
+            "conversion builtins";
         getErrorLog().checkError(false, SPIRVEC_RequiresExtension, F, ErrorStr);
       }
       return nullptr;
@@ -2078,8 +2095,10 @@ SPIRVValue *LLVMToSPIRVBase::transAtomicStore(StoreInst *ST,
                                               SPIRVBasicBlock *BB) {
   spv::Scope S = toSPIRVScope(ST->getContext(), ST->getSyncScopeID());
 
-  std::vector<Value *> Ops{ST->getPointerOperand(), getUInt32(M, S),
-                           getUInt32(M, transAtomicOrdering(ST->getOrdering())),
+  Value *Ptr = ST->getPointerOperand();
+  auto MemSem = transAtomicOrdering(ST->getOrdering()) |
+                getAtomicPointerMemorySemanticsMask(Ptr, Ptr->getType());
+  std::vector<Value *> Ops{Ptr, getUInt32(M, S), getUInt32(M, MemSem),
                            ST->getValueOperand()};
   std::vector<SPIRVValue *> SPIRVOps = transValue(Ops, BB);
 
@@ -2091,9 +2110,10 @@ SPIRVValue *LLVMToSPIRVBase::transAtomicLoad(LoadInst *LD,
                                              SPIRVBasicBlock *BB) {
   spv::Scope S = toSPIRVScope(LD->getContext(), LD->getSyncScopeID());
 
-  std::vector<Value *> Ops{
-      LD->getPointerOperand(), getUInt32(M, S),
-      getUInt32(M, transAtomicOrdering(LD->getOrdering()))};
+  Value *Ptr = LD->getPointerOperand();
+  auto MemSem = transAtomicOrdering(LD->getOrdering()) |
+                getAtomicPointerMemorySemanticsMask(Ptr, Ptr->getType());
+  std::vector<Value *> Ops{Ptr, getUInt32(M, S), getUInt32(M, MemSem)};
   std::vector<SPIRVValue *> SPIRVOps = transValue(Ops, BB);
 
   return mapValue(LD, BM->addInstTemplate(OpAtomicLoad, BM->getIds(SPIRVOps),
@@ -2867,9 +2887,11 @@ LLVMToSPIRVBase::transValueWithoutDecoration(Value *V, SPIRVBasicBlock *BB,
       return nullptr;
 
     AtomicOrderingCABI Ordering = llvm::toCABI(ARMW->getOrdering());
-    auto MemSem = OCLMemOrderMap::map(static_cast<OCLMemOrderKind>(Ordering));
+    Value *Ptr = ARMW->getPointerOperand();
+    auto MemSem = OCLMemOrderMap::map(static_cast<OCLMemOrderKind>(Ordering)) |
+                  getAtomicPointerMemorySemanticsMask(Ptr, Ptr->getType());
     std::vector<Value *> Operands(4);
-    Operands[0] = ARMW->getPointerOperand();
+    Operands[0] = Ptr;
     spv::Scope S = toSPIRVScope(ARMW->getContext(), ARMW->getSyncScopeID());
     Operands[1] = getUInt32(M, S);
     Operands[2] = getUInt32(M, MemSem);
@@ -3353,7 +3375,7 @@ bool LLVMToSPIRVBase::transDecoration(Value *V, SPIRVValue *BV) {
     auto Opcode = BVF->getOpcode();
     if (Opcode == Instruction::FAdd || Opcode == Instruction::FSub ||
         Opcode == Instruction::FMul || Opcode == Instruction::FDiv ||
-        Opcode == Instruction::FRem ||
+        Opcode == Instruction::FRem || BV->getOpCode() == OpFmaKHR ||
         ((Opcode == Instruction::FNeg || Opcode == Instruction::FCmp ||
           BV->isExtInst()) &&
          BM->isAllowedToUseVersion(VersionNumber::SPIRV_1_6))) {
@@ -5122,6 +5144,10 @@ SPIRVValue *LLVMToSPIRVBase::transIntrinsicInst(IntrinsicInst *II,
       return nullptr;
     }
     uint64_t NumElements = static_cast<ConstantInt *>(Len)->getZExtValue();
+    // A zero-sized memset is a no-op. Emitting OpCopyMemorySized with a Size
+    // operand of 0 is invalid SPIR-V, so drop the intrinsic entirely.
+    if (NumElements == 0)
+      return nullptr;
     auto *AT = ArrayType::get(Val->getType(), NumElements);
     SPIRVTypeArray *CompositeTy = static_cast<SPIRVTypeArray *>(transType(AT));
     SPIRVValue *Init;
@@ -5153,6 +5179,11 @@ SPIRVValue *LLVMToSPIRVBase::transIntrinsicInst(IntrinsicInst *II,
                                       MemAccess, BB);
   } break;
   case Intrinsic::memcpy:
+    // A zero-sized memcpy is a no-op. Emitting OpCopyMemorySized with a Size
+    // operand of 0 is invalid SPIR-V, so drop the intrinsic entirely.
+    if (auto *CI = dyn_cast<ConstantInt>(II->getOperand(2)))
+      if (CI->isZero())
+        return nullptr;
     return BM->addCopyMemorySizedInst(
         transValue(II->getOperand(0), BB), transValue(II->getOperand(1), BB),
         transValue(II->getOperand(2), BB),
@@ -5808,8 +5839,9 @@ processMiniFPOrInt4Type(Type *LLVMTy, FPEncodingWrap Encoding,
   unsigned TyWidth = cast<IntegerType>(ScalarTy)->getBitWidth();
   unsigned VecSize = 0;
 
-  bool IsPacked =
-      Encoding == FPEncodingWrap::E2M1 || Encoding == FPEncodingWrap::Integer;
+  bool IsPacked = Encoding == FPEncodingWrap::E2M1 ||
+                  Encoding == FPEncodingWrap::E2M1INTEL ||
+                  Encoding == FPEncodingWrap::Integer;
   if (IsPacked &&
       (TyWidth == 8 || TyWidth == 16 || TyWidth == 32 || TyWidth == 64)) {
     // Int4 or FP4 packed in an integer: each N-bit integer holds N/4 values.
@@ -6539,6 +6571,18 @@ bool isEmptyLLVMModule(Module *M) {
          M->global_empty(); // No global variables
 }
 
+// A module is VectorCompute when any function or global variable carries
+// VectorCompute metadata.
+static bool hasVectorComputeMetadata(Module *M) {
+  return any_of(*M,
+                [](const Function &F) {
+                  return F.hasFnAttribute(kVCMetadata::VCFunction);
+                }) ||
+         any_of(M->globals(), [](const GlobalVariable &GV) {
+           return GV.hasAttribute(kVCMetadata::VCGlobalVariable);
+         });
+}
+
 bool LLVMToSPIRVBase::translate() {
   if (M->getTargetTriple().getVendor() == Triple::VendorType::AMD)
     BM->setGeneratorVer(UINT16_MAX);
@@ -6547,6 +6591,11 @@ bool LLVMToSPIRVBase::translate() {
 
   if (isEmptyLLVMModule(M))
     BM->addCapability(CapabilityLinkage);
+
+  // Check before type translation so that SPIRVTypeVector can choose the
+  // matching capability.
+  if (BM->isAllowedToUseExtension(ExtensionID::SPV_INTEL_vector_compute))
+    BM->setVectorCompute(hasVectorComputeMetadata(M));
 
   if (!lowerBuiltinCallsToVariables(M))
     return false;
