@@ -1789,7 +1789,7 @@ SPIRVToLLVMDbgTran::transDebugIntrinsic(const SPIRVExtInst *DebugInst,
           ConstantPointerNull::get(PointerType::get(M->getContext(), 0));
       auto *Expr = PoisonInvalidExpr(GetExpression(Ops[ExpressionIdx]),
                                      LocalVar.first, Null);
-      DbgRecord DbgDeclare =
+      DbgRecord *DbgDeclare =
           DIB.insertDeclare(Null, LocalVar.first, Expr, Loc, BB);
       return DbgDeclare;
     }
