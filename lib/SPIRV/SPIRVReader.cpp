@@ -2924,38 +2924,25 @@ Value *SPIRVToLLVM::transValueWithoutDecoration(SPIRVValue *BV, Function *F,
     Function *Callee = transFunction(BC->getFunction(),
                                      BM->getFunctionProgramAddrSpace());
     if (!BM->getAddrSpaceMap() && M->getTargetTriple().isAMDGCN()) {
-      if (isKernel(BC->getFunction())) {
-        // In HIPSTDPAR mode we sometimes get some host side calls that have not
-        // yet been pruned (this happens later on reverse translated AMDGPU LLVM
-        // IR); whilst these are essentially dead, we should generate valid IR
-        // nonetheless, and this might require inserting an AS cast.
-        // TODO: we should only do this for HIPSTDPAR modules; this is a
-        //       temporary workaround.
-        std::transform(
-          Callee->arg_begin(), Callee->arg_end(), Args.begin(), Args.begin(),
-          [BB](auto &&Formal, auto &&Actual) {
-          if (!Formal.getType()->isPointerTy())
-            return Actual;
+      // In HIPSTDPAR mode we sometimes get some host side calls that have not
+      // yet been pruned (this happens later on reverse translated AMDGPU LLVM
+      // IR); whilst these are essentially dead, we should generate valid IR
+      // nonetheless, and this might require inserting an AS cast.
+      // TODO: we should only do this for HIPSTDPAR modules; this is a
+      //       temporary workaround.
+      std::transform(
+        Callee->arg_begin(), Callee->arg_end(), Args.begin(), Args.begin(),
+        [BB](auto &&Formal, auto &&Actual) {
+        if (!Formal.getType()->isPointerTy())
+          return Actual;
 
-          if (Formal.getType()->getPointerAddressSpace() ==
-              Actual->getType()->getPointerAddressSpace())
-            return Actual;
+        if (Formal.getType()->getPointerAddressSpace() ==
+            Actual->getType()->getPointerAddressSpace())
+          return Actual;
 
-          return cast<Value>(CastInst::CreatePointerBitCastOrAddrSpaceCast(
-              Actual, Formal.getType(), "", BB));
-        });
-      } else if (Args.size() == 1 &&
-                 (BC->getFunction()->getName() == "llvm.amdgcn.is.shared" ||
-                  BC->getFunction()->getName() == "llvm.amdgcn.is.private")) {
-        if (BC->getArgumentValues().front()->getType()->getPointerStorageClass()
-            != StorageClassGeneric) {
-          auto *PTy = PointerType::get(
-              F->getContext(), mapSPIRVAddrSpaceToAMDGPU(StorageClassGeneric));
-          Args[0] =
-              CastInst::CreatePointerBitCastOrAddrSpaceCast(Args[0], PTy, "",
-                                                            BB);
-        }
-      }
+        return cast<Value>(CastInst::CreatePointerBitCastOrAddrSpaceCast(
+            Actual, Formal.getType(), "", BB));
+      });
     }
     auto *Call = CallInst::Create(Callee, Args, BC->getName(), BB);
     setCallingConv(Call);
@@ -4023,8 +4010,15 @@ Function *SPIRVToLLVM::transFunction(SPIRVFunction *BF, unsigned AS) {
     std::replace(FuncName.begin(), FuncName.end(), '_', '.');
   }
   Function *F = M->getFunction(FuncName);
-  if (!F)
-    F = Function::Create(FT, Linkage, AS, FuncName, M);
+  if (!F) {
+    Intrinsic::ID IID = Intrinsic::not_intrinsic;
+    if (StringRef(FuncName).starts_with("llvm.amdgcn."))
+      IID = Intrinsic::lookupIntrinsicID(FuncName);
+    if (IID != Intrinsic::not_intrinsic && !Intrinsic::isOverloaded(IID))
+      F = Intrinsic::getOrInsertDeclaration(M, IID);
+    else
+      F = Function::Create(FT, Linkage, AS, FuncName, M);
+  }
 
   F = cast<Function>(mapValue(BF, F));
 
@@ -4282,21 +4276,7 @@ Instruction *SPIRVToLLVM::transBuiltinFromInst(const std::string &FuncName,
   }
 
   if (BM->getDesiredBIsRepresentation() != BIsRepresentation::SPIRVFriendlyIR)
-    if (!BM->getAddrSpaceMap() &&
-        M->getTargetTriple().getVendor() == Triple::VendorType::AMD) {
-      auto TmpTys = ArgTys;
-      for (auto &&Ty : TmpTys) {
-        if (auto TPT = dyn_cast<TypedPointerType>(Ty))
-          Ty = TypedPointerType::get(TPT->getElementType(),
-                                     mapAMDGCNAddrSpaceToSPIRV(TPT->getAddressSpace()));
-        else if (isa<PointerType>(Ty))
-          Ty = PointerType::get(Ty->getContext(),
-                                mapAMDGCNAddrSpaceToSPIRV(Ty->getPointerAddressSpace()));
-      }
-      mangleOpenClBuiltin(FuncName, TmpTys, MangledName);
-    } else {
-      mangleOpenClBuiltin(FuncName, ArgTys, MangledName, BM->getAddrSpaceMap());
-    }
+    mangleOpenClBuiltin(FuncName, ArgTys, MangledName, BM->getAddrSpaceMap());
   else
     MangledName = getSPIRVFriendlyIRFunctionName(FuncName, OC, ArgTys, Ops,
                                                  BM->getAddrSpaceMap());
@@ -5196,9 +5176,9 @@ void SPIRVToLLVM::transGlobalAnnotations() {
   }
 }
 
-static llvm::MDNode *
-transDecorationsToMetadataList(llvm::LLVMContext *Context,
-                               std::vector<SPIRVDecorate const *> Decorates) {
+static llvm::MDNode *transDecorationsToMetadataList(
+    llvm::LLVMContext *Context,
+    std::vector<SPIRVDecorateGeneric const *> Decorates) {
   SmallVector<Metadata *, 4> MDs;
   MDs.reserve(Decorates.size());
   for (const auto *Deco : Decorates) {
@@ -5246,6 +5226,15 @@ transDecorationsToMetadataList(llvm::LLVMContext *Context,
       OPs.push_back(StrMD);
       break;
     }
+    case DecorationUniformId: {
+      SPIRVId ScopeId = Deco->getVecLiteral()[0];
+      auto *ScopeConst =
+          static_cast<SPIRVConstant *>(Deco->getModule()->getValue(ScopeId));
+      auto *const ScopeMD = ConstantAsMetadata::get(ConstantInt::get(
+          Type::getInt32Ty(*Context), ScopeConst->getZExtIntValue()));
+      OPs.push_back(ScopeMD);
+      break;
+    }
     default: {
       for (const SPIRVWord Lit : Deco->getVecLiteral()) {
         auto *const LitMD = ConstantAsMetadata::get(
@@ -5265,7 +5254,8 @@ void SPIRVToLLVM::transDecorationsToMetadata(SPIRVValue *BV, Value *V) {
     return;
 
   auto SetDecorationsMetadata = [&](auto V) {
-    std::vector<SPIRVDecorate const *> Decorates = BV->getDecorations();
+    std::vector<SPIRVDecorateGeneric const *> Decorates =
+        BV->getAllDecorations();
     if (!Decorates.empty()) {
       MDNode *MDList = transDecorationsToMetadataList(Context, Decorates);
       V->setMetadata(SPIRV_MD_DECORATIONS, MDList);
@@ -5479,7 +5469,7 @@ void SPIRVToLLVM::transFunctionDecorationsToMetadata(SPIRVFunction *BF,
   addKernelArgumentMetadata(Context, SPIRV_MD_PARAMETER_DECORATIONS, BF, F,
                             [this](SPIRVFunctionParameter *Arg) {
                               return transDecorationsToMetadataList(
-                                  Context, Arg->getDecorations());
+                                  Context, Arg->getAllDecorations());
                             });
 }
 
@@ -5825,7 +5815,7 @@ bool SPIRVToLLVM::transOCLMetadata(SPIRVFunction *BF) {
   addKernelArgumentMetadata(Context, SPIRV_MD_PARAMETER_DECORATIONS, BF, F,
                             [this](SPIRVFunctionParameter *Arg) {
                               return transDecorationsToMetadataList(
-                                  Context, Arg->getDecorations());
+                                  Context, Arg->getAllDecorations());
                             });
   return true;
 }
