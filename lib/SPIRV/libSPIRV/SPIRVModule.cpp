@@ -145,6 +145,9 @@ public:
   SPIRVVariableBase *getVariable(unsigned I) const override {
     return VariableVec[I];
   }
+  SPIRVVariableBase *getAMDGCNFeaturePredicateIds() const override {
+    return AMDGCNFeaturePredicateIds;
+  }
   SPIRVValue *getConst(unsigned I) const override { return ConstVec[I]; }
   std::vector<SPIRVDecorateGeneric *> *getDecorateVec() override {
     return &DecorateVec;
@@ -621,6 +624,9 @@ private:
   SPIRVFunctionVector FuncVec;
   SPIRVConstantVector ConstVec;
   SPIRVVariableVec VariableVec;
+  // Cached pointer to the AMDGCN "llvm.amdgcn.feature.predicate.ids" helper
+  // variable, populated during layout so it can be found without a scan.
+  SPIRVVariableBase *AMDGCNFeaturePredicateIds = nullptr;
   SPIRVEntrySet EntryNoId; // Entries without id
   SPIRVIdToInstructionSetMap IdToInstSetMap;
   SPIRVIdToBuiltinSetMap IdBuiltinMap;
@@ -868,8 +874,14 @@ void SPIRVModuleImpl::layoutEntry(SPIRVEntry *E) {
   case OpVariable:
   case OpUntypedVariableKHR: {
     auto *BV = static_cast<SPIRVVariableBase *>(E);
-    if (!BV->getParent())
+    if (!BV->getParent()) {
       addTo(VariableVec, E);
+      // Cache the AMDGCN feature predicate helper variable so the reader can
+      // populate its map before translating any variable, regardless of where
+      // this variable appears relative to its users.
+      if (BV->getName() == "llvm.amdgcn.feature.predicate.ids")
+        AMDGCNFeaturePredicateIds = BV;
+    }
   } break;
   case OpExtInst: {
     SPIRVExtInst *EI = static_cast<SPIRVExtInst *>(E);

@@ -157,6 +157,10 @@ public:
   virtual SPIRVConditionalExtensionSet &getConditionalExtensions() = 0;
   virtual SPIRVFunction *getFunction(unsigned) const = 0;
   virtual SPIRVVariableBase *getVariable(unsigned) const = 0;
+  // Returns the AMDGCN "llvm.amdgcn.feature.predicate.ids" helper variable if
+  // present, or nullptr otherwise. Cached during parsing so the reader can look
+  // it up in O(1) without scanning the variable list.
+  virtual SPIRVVariableBase *getAMDGCNFeaturePredicateIds() const = 0;
   virtual SPIRVValue *getConst(unsigned) const = 0;
   virtual std::vector<SPIRVDecorateGeneric *> *getDecorateVec() = 0;
   virtual std::vector<SPIRVFunction *> *getFuncVec() = 0;
