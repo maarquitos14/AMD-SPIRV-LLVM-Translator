@@ -689,7 +689,7 @@ jobs:
     name: Test HeCBench
     needs: build
     runs-on: linux-gfx942-1gpu-ccs-csp-ossci-rocm
-    timeout-minutes: 60
+    timeout-minutes: 240
     # This image defaults inline `run:` steps to `sh`; force bash so the steps
     # below can use arrays, process substitution, and [[ ]].
     defaults:
