@@ -192,6 +192,15 @@ jobs:
           mkdir -p "$STAGING/bin"
           cp -a "$LLVM_BUILD/bin/amd-llvm-spirv" "$STAGING/bin/"
 
+      # Build hipcc from the amd-staging fork; test_hecbench compiles with it.
+      - name: Build and stage hipcc
+        run: |
+          cmake -G Ninja -S llvm-project/amd/hipcc -B build-hipcc \
+            -DCMAKE_BUILD_TYPE=Release
+          ninja -C build-hipcc hipcc
+          mkdir -p "$STAGING/bin"
+          cp -a build-hipcc/hipcc "$STAGING/bin/hipcc"
+
       # Create hipconfig script for rocPRIM/hipCUB detection.
       - name: Create hipconfig script
         run: |
