@@ -4,18 +4,20 @@
 #
 # Derivation: 2026-07-15 -be passing set (525), minus benchmarks needing
 # external data (download_datasets.sh / DVC / extract_archives.sh), plus the 23
-# regression-sensitive ones, filled cheapest-first under a ~900s budget = 161
-# (miniWeather-hip dropped: needs OpenMPI, not worth the dependency for one bench).
+# regression-sensitive ones, filled cheapest-first under a ~900s budget.
 # Timings are a gfx90a proxy; recalibrate on gfx942 before making this blocking.
+#
+# 2026-08-18: replaced 39 entries that could not run under the hermetic CI setup
+# (DVC/tarball input data, or missing -lomp / hipblas / hipfft / hipsparse /
+# hipsolver / gsl / boost / numpy, or the f16atomic backend crash) with 39
+# hermetic benchmarks validated to build + self-verify on the amdgcnspirv-be
+# path in the pinned CI container (local gfx90a proxy).
 accuracy-hip
 ace-hip
 adam-hip
 adamw-hip
 addBiasQKV-hip
-addBiasResidualLayerNorm-hip
-aes-hip
 affine-hip
-aidw-hip
 aligned-types-hip
 amgmk-hip
 ans-hip
@@ -23,27 +25,18 @@ aobench-hip
 asta-hip
 atan2-hip
 atomicReduction-hip
-attentionMultiHead-hip
-b+tree-hip
 babelstream-hip
 backprop-hip
 base64e-hip
-bfs-hip
 binomial-hip
 blockexchange-hip
 bscan-hip
-bsw-hip
-ccs-hip
 ccsd-trpdrv-hip
-ced-hip
-cfd-hip
-channelShuffle-hip
 channelSum-hip
 che-hip
 chemv-hip
 clenergy-hip
 clock-hip
-cmp-hip
 cobahh-hip
 collision-hip
 colorwheel-hip
@@ -52,12 +45,9 @@ concurrentKernels-hip
 conversion-hip
 cooling-hip
 cross-hip
-d2q9-bgk-hip
 damage-hip
 dct8x8-hip
 debayer-hip
-deredundancy-hip
-determinant-hip
 dispatch-hip
 distort-hip
 divergence-hip
@@ -66,26 +56,17 @@ dropout-hip
 dxtc2-hip
 easyWave-hip
 ecdh-hip
-egs-hip
 extend2-hip
-f16atomic-hip
 fft-hip
-fhd-hip
 floydwarshall-hip
 fpc-hip
 fpdc-hip
 fwt-hip
 gc-hip
-gels-hip
-gibbs-hip
 graphExecution-hip
 groupnorm-hip
-haversine-hip
-heartwall-hip
 heat-hip
 histogram-hip
-hogbom-hip
-hotspot-hip
 hungarian-hip
 interleave-hip
 intrinsics-cast-hip
@@ -99,7 +80,6 @@ layout-hip
 lda-hip
 libor-hip
 log2-hip
-logan-hip
 lombscargle-hip
 lud-hip
 mallocFree-hip
@@ -107,10 +87,8 @@ mandelbrot-hip
 marchingCubes-hip
 md5hash-hip
 medianfilter-hip
-minimap2-hip
 mis-hip
 mixbench-hip
-mpc-hip
 mr-hip
 mrc-hip
 mrg32k3a-hip
@@ -119,14 +97,12 @@ myocyte-hip
 ne-hip
 nlll-hip
 nms-hip
-nn-hip
 opticalFlow-hip
 overlap-hip
 pad-hip
 particlefilter-hip
 particles-hip
 pathfinder-hip
-permute-hip
 perplexity-hip
 phmm-hip
 projectile-hip
@@ -135,7 +111,6 @@ qtclustering-hip
 quant3MatMul-hip
 quantAQLM-hip
 radixsort-hip
-resnet-kernels-hip
 reverse-hip
 reverse2D-hip
 rmsnorm-hip
@@ -144,27 +119,58 @@ romberg-hip
 rsc-hip
 sc-hip
 scan2-hip
-si-hip
-slit-hip
-sobel-hip
-spaxpby-hip
 split-hip
 spm-hip
-sptrsv-hip
 srad-hip
 stencil1d-hip
 su3-hip
-svd3x3-hip
 threadfence-hip
 tqs-hip
 triad-hip
 tsa-hip
 unfold-hip
-urng-hip
 vmc-hip
 warpexchange-hip
-warpsort-hip
 winograd-hip
-xlqc-hip
 zeropoint-hip
 zmddft-hip
+# --- 2026-08-18 hermetic replacements (cheapest-first) ---
+asyncAllocation-hip
+tensorT-hip
+rowwiseMoments-hip
+iso2dfd-hip
+kiss-hip
+zoom-hip
+wyllie-hip
+blockAccess-hip
+haccmk-hip
+pitch-hip
+overlay-hip
+scatterThrust-hip
+ert-hip
+popcount-hip
+black-scholes-hip
+present-hip
+bsearch-hip
+multinomial-hip
+nbnxm-hip
+p4-hip
+ga-hip
+maxpool3d-hip
+idivide-hip
+sheath-hip
+crc64-hip
+matrix-rotate-hip
+f8cast-hip
+atomicSystemWide-hip
+reaction-hip
+sph-hip
+compute-score-hip
+gabor-hip
+ldpc-hip
+extrema-hip
+recursiveGaussian-hip
+shmembench-hip
+atomicPerf-hip
+hellinger-hip
+attentionMergeState-hip

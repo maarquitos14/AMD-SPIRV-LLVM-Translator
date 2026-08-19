@@ -146,8 +146,9 @@ if [[ -n "${HIP_CLANG_PATH:-}" ]]; then
     export PATH="${HIP_CLANG_PATH}:${PATH}"
     export LD_LIBRARY_PATH="$(dirname "${HIP_CLANG_PATH}")/lib:${LD_LIBRARY_PATH}"
 fi
-# hipcc/amdclang++ honor this for AMDGCN bitcode lookup
-export HIP_DEVICE_LIB_PATH="${ROCM_PATH}/lib/llvm/amdgcn/bitcode"
+# Runtime JIT (comgr) honors this for AMDGCN bitcode lookup; device libs are
+# installed at the canonical ROCm layout ${ROCM_PATH}/amdgcn/bitcode.
+export HIP_DEVICE_LIB_PATH="${ROCM_PATH}/amdgcn/bitcode"
 export ROCR_VISIBLE_DEVICES="$GPU_ID"
 # prna-hip reads DATAPATH; overridable, harmless default for the rest.
 export DATAPATH="${DATAPATH:-${HECBENCH_SRC}/prna-cuda/data_tables}"

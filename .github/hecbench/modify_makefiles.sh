@@ -46,7 +46,7 @@ if ! HECBENCH_SRC=$(find_hecbench_src "$SCRIPT_DIR"); then
     exit 1
 fi
 
-DEVICE_LIB_PATH="${ROCM_PATH}/lib/llvm/amdgcn/bitcode"
+DEVICE_LIB_PATH="${ROCM_PATH}/amdgcn/bitcode"
 
 # ==============================================================================
 # FUNCTIONS
