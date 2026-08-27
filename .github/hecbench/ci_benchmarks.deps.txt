@@ -50,7 +50,6 @@ mis-cuda
 mrc-cuda
 mr-cuda
 multinomial-cuda
-nbnxm-cuda
 nlll-cuda
 nms-cuda
 opticalFlow-cuda

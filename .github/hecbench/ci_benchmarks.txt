@@ -153,7 +153,9 @@ black-scholes-hip
 present-hip
 bsearch-hip
 multinomial-hip
-nbnxm-hip
+# QUARANTINED: times out on amdgcnspirv-be (hipMallocManaged). Un-quarantine
+# after ORNL/HeCBench#326 lands and HECBENCH_REF is bumped past it.
+#nbnxm-hip
 p4-hip
 ga-hip
 maxpool3d-hip
