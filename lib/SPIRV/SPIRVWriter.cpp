@@ -3528,7 +3528,8 @@ bool LLVMToSPIRVBase::transAlign(Value *V, SPIRVValue *BV) {
     return true;
   }
   if (auto *GV = dyn_cast<GlobalVariable>(V)) {
-    BM->setAlignment(BV, GV->getAlignment());
+    if (MaybeAlign Alignment = GV->getAlign())
+      BM->setAlignment(BV, Alignment->value());
     return true;
   }
   return true;
@@ -6676,6 +6677,11 @@ bool LLVMToSPIRVBase::translate() {
     BM->setGeneratorVer(UINT16_MAX);
   else
     BM->setGeneratorVer(KTranslatorVer);
+
+  if (!BM->getErrorLog().checkError(
+          M->getModuleInlineAsm().empty(), SPIRVEC_InvalidLlvmModule,
+          "Module-level inline assembly is not supported in SPIR-V"))
+    return false;
 
   if (isEmptyLLVMModule(M))
     BM->addCapability(CapabilityLinkage);

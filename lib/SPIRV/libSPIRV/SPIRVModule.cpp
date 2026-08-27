@@ -94,6 +94,7 @@ public:
   SPIRVModuleImpl(const SPIRV::TranslatorOpts &Opts) : SPIRVModuleImpl() {
     TranslationOpts = Opts;
     MaxVersion = Opts.getMaxVersion();
+    ErrLog.setErrorHandlingKind(Opts.getErrorHandlingKind());
   }
 
   ~SPIRVModuleImpl() override;
@@ -144,6 +145,9 @@ public:
   SPIRVFunction *getFunction(unsigned I) const override { return FuncVec[I]; }
   SPIRVVariableBase *getVariable(unsigned I) const override {
     return VariableVec[I];
+  }
+  SPIRVVariableBase *getAMDGCNFeaturePredicateIds() const override {
+    return AMDGCNFeaturePredicateIds;
   }
   SPIRVValue *getConst(unsigned I) const override { return ConstVec[I]; }
   std::vector<SPIRVDecorateGeneric *> *getDecorateVec() override {
@@ -621,6 +625,9 @@ private:
   SPIRVFunctionVector FuncVec;
   SPIRVConstantVector ConstVec;
   SPIRVVariableVec VariableVec;
+  // Cached pointer to the AMDGCN "llvm.amdgcn.feature.predicate.ids" helper
+  // variable, populated during layout so it can be found without a scan.
+  SPIRVVariableBase *AMDGCNFeaturePredicateIds = nullptr;
   SPIRVEntrySet EntryNoId; // Entries without id
   SPIRVIdToInstructionSetMap IdToInstSetMap;
   SPIRVIdToBuiltinSetMap IdBuiltinMap;
@@ -868,8 +875,14 @@ void SPIRVModuleImpl::layoutEntry(SPIRVEntry *E) {
   case OpVariable:
   case OpUntypedVariableKHR: {
     auto *BV = static_cast<SPIRVVariableBase *>(E);
-    if (!BV->getParent())
+    if (!BV->getParent()) {
       addTo(VariableVec, E);
+      // Cache the AMDGCN feature predicate helper variable so the reader can
+      // populate its map before translating any variable, regardless of where
+      // this variable appears relative to its users.
+      if (BV->getName() == "llvm.amdgcn.feature.predicate.ids")
+        AMDGCNFeaturePredicateIds = BV;
+    }
   } break;
   case OpExtInst: {
     SPIRVExtInst *EI = static_cast<SPIRVExtInst *>(E);
@@ -2570,7 +2583,7 @@ std::istream &SPIRVModuleImpl::parseSPT(std::istream &I) {
     SPIRVDBG(spvdbgs() << "Read word: W = " << W << " V = 0\n");
     return W;
   };
-  SPIRVErrorLog ErrorLog = MI.getErrorLog();
+  SPIRVErrorLog &ErrorLog = MI.getErrorLog();
   SPIRVWord Magic = ReadSPIRVWord(I);
 
   if (!ErrorLog.checkError(!I.eof(), SPIRVEC_InvalidModule,

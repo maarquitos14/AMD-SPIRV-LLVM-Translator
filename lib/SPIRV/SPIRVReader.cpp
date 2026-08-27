@@ -4573,16 +4573,24 @@ bool SPIRVToLLVM::translate() {
       DbgTran->transDebugInst(EI);
   }
 
+  // Populate the feature predicate map before translating any variables,
+  // because variable translation can recursively trigger function translation
+  // (e.g. via __clang_gpu_used_external), which may reference spec constants
+  // that depend on the predicate map. The helper variable is cached during
+  // parsing, so this needs no separate scan and may appear anywhere in the
+  // variable list relative to its users.
+  SPIRVVariableBase *FeaturePredicateIds =
+      M->getTargetTriple().isAMDGCN() ? BM->getAMDGCNFeaturePredicateIds()
+                                      : nullptr;
+  if (FeaturePredicateIds)
+    addFeaturePredicateMap(FeaturePredicateIds->getInitializer());
+
   for (unsigned I = 0, E = BM->getNumVariables(); I != E; ++I) {
     auto *BV = BM->getVariable(I);
-    if (BV->getStorageClass() != StorageClassFunction) {
-      // The feature predicate map is just a helper, we never emit it.
-      if (M->getTargetTriple().isAMDGCN() &&
-          BV->getName() == "llvm.amdgcn.feature.predicate.ids")
-        addFeaturePredicateMap(BV->getInitializer());
-      else
-        transValue(BV, nullptr, nullptr);
-    }
+    // The feature predicate map is just a helper, we never emit it.
+    if (BV->getStorageClass() != StorageClassFunction &&
+        BV != FeaturePredicateIds)
+      transValue(BV, nullptr, nullptr);
     transGlobalCtorDtors(BV);
   }
 
@@ -4610,13 +4618,6 @@ bool SPIRVToLLVM::translate() {
   for (unsigned I = 0, E = BM->getNumFunctions(); I != E; ++I) {
     transFunction(BM->getFunction(I), BM->getFunctionProgramAddrSpace());
     transUserSemantic(BM->getFunction(I));
-  }
-
-  if (M->getTargetTriple().isAMDGCN()) {
-    SmallVector<Function *> MaybeUnreachable = collectUsedFunctions(*M);
-    for (auto &&[F, FPU] : FeaturePredicateUsers)
-      maybeFoldFeaturePredicates(F, FPU);
-    removeUnreachableFunctions(MaybeUnreachable);
   }
 
   transGlobalAnnotations();
@@ -4651,6 +4652,12 @@ bool SPIRVToLLVM::translate() {
 
   if (M->getTargetTriple().getVendor() != Triple::VendorType::AMD)
     return true;
+
+  SmallVector<Function *> MaybeUnreachable = collectUsedFunctions(*M);
+  for (auto &&[F, FPU] : FeaturePredicateUsers)
+    maybeFoldFeaturePredicates(F, FPU);
+  removeUnreachableFunctions(MaybeUnreachable);
+
   // TODO: this is temporary hardcoding, but will ultimately get handled in the
   // FE.
   M->addModuleFlag(llvm::Module::Error, "amdhsa_code_object_version", 600);
@@ -6828,9 +6835,8 @@ bool llvm::readSpirv(LLVMContext &C, const SPIRV::TranslatorOpts &Opts,
   return true;
 }
 
-bool llvm::getSpecConstInfo(std::istream &IS,
-                            std::vector<SpecConstInfoTy> &SpecConstInfo) {
-  std::unique_ptr<SPIRVModule> BM(SPIRVModule::createSPIRVModule());
+static bool getSpecConstInfoImpl(std::istream &IS, SPIRVModule *BM,
+                                 std::vector<SpecConstInfoTy> &SpecConstInfo) {
   BM->setAutoAddExtensions(false);
   SPIRVDecoder D(IS, *BM);
   SPIRVWord Magic;
@@ -6907,6 +6913,18 @@ bool llvm::getSpecConstInfo(std::istream &IS,
     }
   }
   return !IS.bad();
+}
+
+bool llvm::getSpecConstInfo(std::istream &IS,
+                            std::vector<SpecConstInfoTy> &SpecConstInfo) {
+  std::unique_ptr<SPIRVModule> BM(SPIRVModule::createSPIRVModule());
+  return getSpecConstInfoImpl(IS, BM.get(), SpecConstInfo);
+}
+
+bool llvm::getSpecConstInfo(std::istream &IS, const SPIRV::TranslatorOpts &Opts,
+                            std::vector<SpecConstInfoTy> &SpecConstInfo) {
+  std::unique_ptr<SPIRVModule> BM(SPIRVModule::createSPIRVModule(Opts));
+  return getSpecConstInfoImpl(IS, BM.get(), SpecConstInfo);
 }
 
 // clang-format off

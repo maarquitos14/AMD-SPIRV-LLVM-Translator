@@ -13,7 +13,7 @@ env:
   # bump only after CI's Build + Test rocm-examples jobs pass on the candidate
   # SHA (gated by .github/workflows/automerge-rocm-examples.yml). Keep this on
   # its own line: the bumper rewrites exactly this line via sed.
-  ROCM_EXAMPLES_REF: 269e9068d6fd6e68b1cc5a76eb77744f88af42ec
+  ROCM_EXAMPLES_REF: 33f07a01bd386a5213de5d8253df69b11dcf7bdd
   # Pinned ORNL/HeCBench revision for the test_hecbench job (not a moving branch,
   # so upstream churn can't fail unrelated PRs). Bump after re-validating the subset.
   HECBENCH_REF: ab972efc2e3514bb7704c6685f2629f1638b8a50
@@ -38,7 +38,7 @@ jobs:
   # =====================================================================
   build:
     name: Build
-    runs-on: azure-linux-scale-rocm
+    runs-on: aws-linux-scale-rocm-large
     timeout-minutes: 120
     container:
       image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:702a5133851e6d1daf1207d2c9fbb01c2667914a5b6dc5a01faeb3ce66ea6421
@@ -369,7 +369,7 @@ jobs:
   test_translator_lit:
     name: Test SPIRV translator lit
     needs: build
-    runs-on: azure-linux-scale-rocm
+    runs-on: aws-linux-scale-rocm-large
     timeout-minutes: 30
     container:
       image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:702a5133851e6d1daf1207d2c9fbb01c2667914a5b6dc5a01faeb3ce66ea6421
@@ -476,7 +476,7 @@ jobs:
   test_codegen:
     name: Test LLVM SPIRV codegen
     needs: build
-    runs-on: azure-linux-scale-rocm
+    runs-on: aws-linux-scale-rocm-large
     timeout-minutes: 15
     container:
       image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:702a5133851e6d1daf1207d2c9fbb01c2667914a5b6dc5a01faeb3ce66ea6421
@@ -519,7 +519,7 @@ jobs:
   test_comgr:
     name: Test Comgr
     needs: build
-    runs-on: azure-linux-scale-rocm
+    runs-on: aws-linux-scale-rocm-large
     timeout-minutes: 30
     container:
       image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:702a5133851e6d1daf1207d2c9fbb01c2667914a5b6dc5a01faeb3ce66ea6421
