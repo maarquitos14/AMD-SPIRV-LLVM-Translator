@@ -743,25 +743,6 @@ jobs:
           git checkout -q FETCH_HEAD
           echo "Checked out $(find src -maxdepth 1 -type d -name '*-hip' | wc -l) -hip dirs"
 
-      # TEMPORARY diagnostic instrumentation for two MI300-only failures that
-      # pass on gfx90a/gfx942 (shmembench-hip, ans-hip). Prints the actual
-      # checksum sum and the first decode mismatch so the artifact logs reveal
-      # how far off MI300 is. Remove once the divergence is root-caused.
-      - name: Instrument diagnostics (temporary)
-        env:
-          HECBENCH_SRC: ${{ github.workspace }}/HeCBench/src
-        run: |
-          shm="$HECBENCH_SRC/shmembench-hip/shmem_kernels.cu"
-          grep -q '\[DIAG shmembench\]' "$shm" || perl -pi -e \
-            's{^(\s*)if \(sum != 21256458760384741137729978368\.00\)}{$1printf("[DIAG shmembench] sum=%.6f diff=%.6e\\n", sum, sum - 21256458760384741137729978368.00);\n$1if (sum != 21256458760384741137729978368.00)}' \
-            "$shm"
-          ans="$HECBENCH_SRC/ans-hip/src/main.cu"
-          grep -q '\[DIAG ans\]' "$ans" || perl -pi -e \
-            's{(else std::cout << "\*+ MISMATCH \*+" << std::endl;)}{$1\n    { auto* _a=random_data->data(); auto* _b=output_buffer->get_decompressed_data().get(); size_t _n=0,_f=input_size; for(size_t _i=0;_i<input_size;_i++){ if(_a[_i]!=_b[_i]){ if(_f==input_size)_f=_i; ++_n; } } if(_n) std::cerr << "[DIAG ans] lambda=" << lambda << " mismatches=" << _n << "/" << input_size << " first@" << _f << " exp=" << (int)_a[_f] << " act=" << (int)_b[_f] << std::endl; }}' \
-            "$ans"
-          echo "shmembench instrumented:"; grep -c 'DIAG shmembench' "$shm"
-          echo "ans instrumented:";        grep -c 'DIAG ans' "$ans"
-
       # Rewrite Makefiles for the staged ROCm, then build+run+self-verify.
       # bench.sh always exits 0 (results land in its log dir); next step gates.
       - name: Run HeCBench subset
@@ -771,19 +752,6 @@ jobs:
           HIP_CLANG_PATH: ${{ github.workspace }}/${{ env.LLVM_BUILD }}/bin
           HECBENCH_SRC: ${{ github.workspace }}/HeCBench/src
         run: |
-          # Identify the exact GPU/driver (MI300X vs MI300A, CU count, firmware).
-          # rocminfo/rocm-smi are not in this container, so fall back to KFD sysfs
-          # and amdgpu procfs, which work off the /dev/kfd + /dev/dri passthrough.
-          echo "::group::GPU / driver identification"
-          command -v rocminfo >/dev/null && rocminfo | head -40 || echo "rocminfo: not available"
-          command -v rocm-smi >/dev/null && rocm-smi --showproductname --showfwinfo || echo "rocm-smi: not available"
-          cat /proc/driver/amdgpu/version 2>/dev/null || echo "amdgpu procfs: not available"
-          for n in /sys/class/kfd/kfd/topology/nodes/*/; do
-            [ -r "$n/name" ] || continue
-            echo "node $(basename "$n"): name=$(cat "$n/name" 2>/dev/null)"
-            grep -E 'gfx_target_version|simd_count|cu_|max_engine_clk' "$n/properties" 2>/dev/null || true
-          done
-          echo "::endgroup::"
           # Surface the toolchain layout: does staging provide a usable hipcc?
           echo "ROCM_PATH=$ROCM_PATH"; ls -la "$ROCM_PATH/bin" | grep -iE 'hip|clang' || true
           "$SCRIPTS/modify_makefiles.sh"
