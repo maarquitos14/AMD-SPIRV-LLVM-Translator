@@ -700,10 +700,13 @@ jobs:
       options: |
         --device=/dev/kfd --device=/dev/dri  --group-add video
 
-    # Single source of truth for the HeCBench log dir: bench.sh writes here, and
-    # the gate + upload steps read the same value. Tagged with the run id (+
-    # attempt) so the uploaded logs map back to this exact workflow run.
+    # Job-wide constants so each is defined once. SCRIPTS is the vendored driver
+    # dir; HECBENCH_LOG_DIR is the single source of truth for the log dir (bench.sh
+    # writes it, the gate + upload steps read it), tagged with the run id (+
+    # attempt) so the uploaded logs map back to this exact workflow run. (An env
+    # entry can't reference another, so HECBENCH_LOG_DIR respells the SCRIPTS path.)
     env:
+      SCRIPTS: ${{ github.workspace }}/SPIRV-LLVM-Translator/.github/hecbench
       HECBENCH_LOG_DIR: ${{ github.workspace }}/SPIRV-LLVM-Translator/.github/hecbench/bench_logs_${{ github.run_id }}-${{ github.run_attempt }}_amdgcnspirv-be
 
     steps:
@@ -733,8 +736,6 @@ jobs:
       # Single sparse, shallow blob:none pass over the subset + precomputed deps
       # (ci_benchmarks.deps.txt from update_deps.sh): ~90 MB, not the full repo.
       - name: Checkout HeCBench (pinned, sparse subset)
-        env:
-          SCRIPTS: ${{ github.workspace }}/SPIRV-LLVM-Translator/.github/hecbench
         run: |
           git init -q HeCBench
           cd HeCBench
@@ -753,7 +754,6 @@ jobs:
       # bench.sh always exits 0 (results land in its log dir); next step gates.
       - name: Run HeCBench subset
         env:
-          SCRIPTS: ${{ github.workspace }}/SPIRV-LLVM-Translator/.github/hecbench
           ROCM_PATH: ${{ github.workspace }}/${{ env.STAGING }}
           HIP_CLANG_PATH: ${{ github.workspace }}/${{ env.LLVM_BUILD }}/bin
           HECBENCH_SRC: ${{ github.workspace }}/HeCBench/src
