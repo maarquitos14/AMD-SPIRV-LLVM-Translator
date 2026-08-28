@@ -756,7 +756,7 @@ jobs:
           echo "ROCM_PATH=$ROCM_PATH"; ls -la "$ROCM_PATH/bin" | grep -iE 'hip|clang' || true
           "$SCRIPTS/modify_makefiles.sh"
           FILTER=$(grep -vE '^[[:space:]]*(#|$)' "$SCRIPTS/ci_benchmarks.txt" | paste -sd,)
-          "$SCRIPTS/bench.sh" --gpu-id 0 --timeout 300 --filter "$FILTER" amdgcnspirv-be
+          "$SCRIPTS/bench.sh" --gpu-id 0 --timeout 300 --filter "$FILTER"
 
       - name: Gate on HeCBench results
         if: always()

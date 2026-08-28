@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Build and run HeCBench HIP benchmarks in one step (see show_usage below).
+# Build and run the HeCBench HIP subset for the amdgcnspirv SPIR-V backend,
+# self-verifying each benchmark's output. Results land in a bench_logs_* dir;
+# the CI "Gate on HeCBench results" step reads those logs.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -7,64 +9,45 @@ SCRIPT_NAME="$(basename "$0")"
 
 # shellcheck source=lib/common.sh
 source "${SCRIPT_DIR}/lib/common.sh"
-# shellcheck source=lib/presets.sh
-source "${SCRIPT_DIR}/lib/presets.sh"
 
 # ==============================================================================
 # DEFAULTS
 # ==============================================================================
 
+# "amdgcnspirv-be" is the user-facing token (log dir suffix, prints); the make
+# HIP_ARCH is plain amdgcnspirv, built via the default SPIR-V backend.
+ARCH="amdgcnspirv-be"
+HIPCC_ARCH="amdgcnspirv"
+
 TIMEOUT_SECONDS=${TIMEOUT_SECONDS:-300}
-GPU_ID=${GPU_ID:-0,1}  # Use both GPUs by default for multi-GPU benchmarks
+GPU_ID=${GPU_ID:-0}
 BENCHMARK_FILTER=${BENCHMARK_FILTER:-}
-DRY_RUN=false
 
 show_usage() {
     cat <<EOF
-Usage: $SCRIPT_NAME [OPTIONS] HIP_ARCH
+Usage: $SCRIPT_NAME --filter LIST [OPTIONS]
 
-Build and run HeCBench HIP benchmarks in one step.
-
-Arguments:
-    HIP_ARCH                GPU architecture (e.g., gfx90a, gfx908, amdgcnspirv,
-                            amdgcnspirv-be [amdgcnspirv via the default SPIRV backend])
+Build and run the HeCBench HIP subset for the amdgcnspirv SPIR-V backend.
 
 Options:
-    --preset PRESET         Run a predefined subset (quick, standard, extended)
-                              quick    ~10min  (179 benchmarks, fastest by wall time)
-                              standard ~30min  (318 benchmarks)
-                              extended ~60min  (417 benchmarks)
-                            Presets are cumulative: quick ⊂ standard ⊂ extended ⊂ full.
-                            Times are approximate and based on gfx90a measurements.
-    --filter LIST           Only run specified benchmarks (comma-separated)
-                            (e.g., --filter dp4a-hip,saxpy-ompt-hip)
-    --timeout SECONDS       Per-benchmark timeout (default: $TIMEOUT_SECONDS)
-    --gpu-id N              ROCR_VISIBLE_DEVICES value (default: $GPU_ID)
-    --dry-run               Show what would run without executing
-    --help, -h              Show this help
+    --filter LIST      Comma-separated benchmark dir names (e.g. dp4a-hip,fft-hip)
+    --timeout SECONDS  Per-benchmark timeout (default: $TIMEOUT_SECONDS)
+    --gpu-id N         ROCR_VISIBLE_DEVICES value (default: $GPU_ID)
+    --help, -h         Show this help
 
 Environment Variables:
-    ROCM_PATH               REQUIRED. Path to ROCm installation.
-    HECBENCH_SRC            Path to HeCBench src (auto-detected if not set)
-    BENCHMARK_FILTER        Comma-separated list of benchmarks (overrides --filter)
-
-Examples:
-    ./$SCRIPT_NAME gfx90a
-    ./$SCRIPT_NAME --preset quick gfx90a
-    ./$SCRIPT_NAME --preset standard amdgcnspirv
-    ./$SCRIPT_NAME --filter dp4a-hip,saxpy-ompt-hip gfx90a
-    ./$SCRIPT_NAME --timeout 600 amdgcnspirv
+    ROCM_PATH          REQUIRED. Path to ROCm installation.
+    HECBENCH_SRC       Path to HeCBench src (auto-detected if not set)
+    HIP_CLANG_PATH     clang bin dir for hipcc to drive (default: \$ROCM_PATH/bin)
 
 Output:
-    bench_logs_YYYYMMDD_HHMMSS_<arch>/
-        timings.csv          benchmark,build_seconds,run_seconds
-        success.log          benchmarks that built and ran cleanly
-        failed.log           non-zero exit (build or run)
-        suspect.log          exit 0 but output contains validation failures
-                             (FAIL, MISMATCH, nan, missing input data, etc.)
-        timeout.log          exceeded --timeout
-        skipped.log          architecture-unsupported (e.g. saxpy-ompt-hip on amdgcnspirv)
-        <benchmark>.log      per-benchmark combined build+run output
+    bench_logs_YYYYMMDD_HHMMSS_amdgcnspirv-be/
+        timings.csv    benchmark,build_seconds,run_seconds
+        success.log    built and ran cleanly
+        failed.log     non-zero exit (build or run)
+        suspect.log    exit 0 but output contains validation failures
+        timeout.log    exceeded --timeout
+        <benchmark>.log per-benchmark combined build+run output
 EOF
 }
 
@@ -72,55 +55,20 @@ EOF
 # ARG PARSING
 # ==============================================================================
 
-ARCH=""
-PRESET=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --help|-h)        show_usage; exit 0 ;;
-        --preset)         PRESET="$2"; shift 2 ;;
-        --dry-run)        DRY_RUN=true; shift ;;
-        --filter)         BENCHMARK_FILTER="$2"; shift 2 ;;
-        --timeout)        TIMEOUT_SECONDS="$2"; shift 2 ;;
-        --gpu-id)         GPU_ID="$2"; shift 2 ;;
-        -*)               log_error "Unknown option: $1"; show_usage; exit 1 ;;
-        *)
-            if [[ -z "$ARCH" ]]; then
-                ARCH="$1"
-            else
-                log_error "Multiple HIP_ARCH values; this script accepts one"
-                exit 1
-            fi
-            shift
-            ;;
+        --help|-h)    show_usage; exit 0 ;;
+        --filter)     BENCHMARK_FILTER="$2"; shift 2 ;;
+        --timeout)    TIMEOUT_SECONDS="$2"; shift 2 ;;
+        --gpu-id)     GPU_ID="$2"; shift 2 ;;
+        *)            log_error "Unknown argument: $1"; show_usage; exit 1 ;;
     esac
 done
 
-# Resolve --preset into BENCHMARK_FILTER (--filter takes precedence).
-if [[ -n "$PRESET" && -z "$BENCHMARK_FILTER" ]]; then
-    case "$PRESET" in
-        quick)    BENCHMARK_FILTER="$PRESET_QUICK" ;;
-        standard) BENCHMARK_FILTER="$PRESET_STANDARD" ;;
-        extended) BENCHMARK_FILTER="$PRESET_EXTENDED" ;;
-        *)
-            log_error "Unknown preset: $PRESET (choose: quick, standard, extended)"
-            exit 1
-            ;;
-    esac
-fi
-
-if [[ -z "$ARCH" ]]; then
-    log_error "HIP_ARCH is required"
+if [[ -z "$BENCHMARK_FILTER" ]]; then
+    log_error "--filter is required"
     show_usage
     exit 1
-fi
-
-# $ARCH is the user-facing token (log dir, prints); HIPCC_ARCH is what make gets
-# as HIP_ARCH=. "amdgcnspirv-be" is our alias for the default SPIRV backend, so
-# it maps to plain amdgcnspirv; every other arch passes through unchanged.
-if [[ "$ARCH" == "amdgcnspirv-be" ]]; then
-    HIPCC_ARCH="amdgcnspirv"
-else
-    HIPCC_ARCH="$ARCH"
 fi
 
 # ==============================================================================
@@ -150,16 +98,21 @@ fi
 # installed at the canonical ROCm layout ${ROCM_PATH}/amdgcn/bitcode.
 export HIP_DEVICE_LIB_PATH="${ROCM_PATH}/amdgcn/bitcode"
 export ROCR_VISIBLE_DEVICES="$GPU_ID"
-# prna-hip reads DATAPATH; overridable, harmless default for the rest.
-export DATAPATH="${DATAPATH:-${HECBENCH_SRC}/prna-cuda/data_tables}"
 ulimit -s unlimited 2>/dev/null || true
+
+# libhipcxx <chrono> hard-errors on amdgcnspirv because no compile-time __gfx*__
+# macro is defined for SPIR-V; allow it through and silence the warning. NDEBUG
+# keeps host-side asserts out of timing paths. Passed to every benchmark build.
+declare -a MAKE_ARGS=(
+    HIP_ARCH="$HIPCC_ARCH"
+    "EXTRA_CFLAGS=-D_LIBCUDACXX_ALLOW_UNSUPPORTED_ARCHITECTURE -DNDEBUG"
+)
 
 echo "benchmark,build_seconds,run_seconds" > "$LOG_DIR/timings.csv"
 touch "$LOG_DIR/success.log" \
       "$LOG_DIR/failed.log" \
       "$LOG_DIR/suspect.log" \
-      "$LOG_DIR/timeout.log" \
-      "$LOG_DIR/skipped.log"
+      "$LOG_DIR/timeout.log"
 
 log_info "==========================================="
 log_info "HeCBench bench (build+run merged)"
@@ -186,86 +139,6 @@ echo ""
 # PER-BENCHMARK
 # ==============================================================================
 
-# Architecture-incompatibility skip list.
-should_skip() {
-    local name="$1"
-    # saxpy-ompt-hip needs a concrete GPU ISA; spirv64-amd-amdhsa not in toolchain.
-    [[ "$name" == "saxpy-ompt-hip" && "$HIPCC_ARCH" == "amdgcnspirv" ]] && return 0
-    # TEMP: pingpong-hip hangs in MPI/NCCL (pre-existing issue, unrelated to
-    # current TheRock bring-up); burns the full timeout for nothing.
-    [[ "$name" == "pingpong-hip" ]] && return 0
-    [[ "$name" == "assert-hip" ]] && return 0
-
-    return 1
-}
-
-# Benchmarks that need special environment overrides for `make run`.
-apply_special_env() {
-    local name="$1"
-    case "$name" in
-        assert-hip)
-            # This benchmark intentionally triggers a device-side assertion to
-            # verify host-side error reporting. Suppress the ROCm runtime's GPU
-            # coredump on exception so the apport pipe in core_pattern is not
-            # invoked. Keep coredumps enabled for every other benchmark.
-            export HSA_DISABLE_COREDUMP_ON_EXCEPTION=1
-            ;;
-    esac
-}
-
-clear_special_env() {
-    local name="$1"
-    case "$name" in
-        assert-hip)
-            unset HSA_DISABLE_COREDUMP_ON_EXCEPTION
-            ;;
-    esac
-}
-
-# Extra `make` command-line arguments specific to a benchmark. Used for
-# benchmarks whose Makefile reads a variable other than HIP_ARCH for the
-# offload arch (e.g. saxpy-ompt-hip uses ARCH for OpenMP `-march=$(ARCH)`).
-# Returns the extra args via stdout, one per line.
-extra_make_args() {
-    local name="$1"
-    case "$name" in
-        saxpy-ompt-hip)
-            echo "ARCH=$ARCH"
-            ;;
-    esac
-    # libhipcxx <chrono> hard-errors on amdgcnspirv because no compile-time
-    # __gfx*__ macro is defined for SPIR-V; allow it through and silence the
-    # accompanying warning. Host-side std::chrono is unaffected.
-    # Applies to both SPIRV paths. Plain amdgcnspirv also opts out of the
-    # (now default) backend to exercise the legacy translator.
-    if [[ "$HIPCC_ARCH" == "amdgcnspirv" ]]; then
-        echo "EXTRA_CFLAGS=-D_LIBCUDACXX_ALLOW_UNSUPPORTED_ARCHITECTURE -DNDEBUG"
-        [[ "$ARCH" == "amdgcnspirv" ]] && echo "EXTRA_HIPCCFLAGS=-no-use-spirv-backend"
-    fi
-}
-
-# Per-benchmark direct-run override. When non-empty, bench_one builds with
-# `make` (default target) and then invokes each emitted command directly,
-# bypassing the Makefile's `run:` recipe. Each line is "binary arg1 arg2 ..."
-# parsed with `read -ra`; the binary is resolved relative to $dir.
-#
-# Use this when the Makefile's `run:` recipe includes a config that exceeds
-# this system's resources (e.g. attention-paged-hip's 131072-block case OOMs
-# on MI210). Keeps coverage of the configs that fit without an upstream patch.
-direct_run_argsets() {
-    local name="$1"
-    local arch="${2:-$ARCH}"
-    case "$name" in
-        attention-paged-hip)
-            # 4th make-run config (131072 kv blocks) OOMs; substitute 65536.
-            echo "./main 8 32 128 4096 128 100"
-            echo "./main 8 32 128 4096 1024 100"
-            echo "./main 8 32 128 4096 8192 100"
-            echo "./main 8 32 128 4096 65536 100"
-            ;;
-    esac
-}
-
 # check_output_validation() is defined in lib/common.sh.
 
 bench_one() {
@@ -273,37 +146,21 @@ bench_one() {
     local name; name=$(basename "$dir")
     local log="$LOG_DIR/${name}.log"
 
-    if should_skip "$name"; then
-        log_info "Skipped: $name (arch unsupported)"
-        echo "$name" >> "$LOG_DIR/skipped.log"
-        return
-    fi
-
-    if [[ "$DRY_RUN" == "true" ]]; then
-        log_info "[DRY-RUN] Would build+run: $name"
-        return
-    fi
-
     # Reclaim leaked OpenMPI/RCCL backing files in /dev/shm so an MPI benchmark
     # whose predecessor was SIGKILL'd doesn't fail with "not enough space".
     cleanup_stale_shm
 
     cd "$dir" || { log_error "$name: cannot cd to $dir"; return; }
-    apply_special_env "$name"
 
     # Clean to ensure a deterministic build state.
     make clean &>/dev/null || true
 
     local build_start build_elapsed run_start run_elapsed rc
-    local -a make_extra=()
-    while IFS= read -r arg; do
-        [[ -n "$arg" ]] && make_extra+=("$arg")
-    done < <(extra_make_args "$name")
 
     # ---- Phase 1: BUILD (default target only) ----
     build_start=$(date +%s.%N)
     set +e
-    timeout "$TIMEOUT_SECONDS" make HIP_ARCH="$HIPCC_ARCH" "${make_extra[@]}" &>"$log"
+    timeout "$TIMEOUT_SECONDS" make "${MAKE_ARGS[@]}" &>"$log"
     rc=$?
     set -e
     build_elapsed=$(awk "BEGIN {printf \"%.3f\", $(date +%s.%N) - $build_start}")
@@ -316,40 +173,30 @@ bench_one() {
             log_error "Failed (build): $name (exit $rc)"
             echo "$name" >> "$LOG_DIR/failed.log"
         fi
-        clear_special_env "$name"
         cd "$SCRIPT_DIR"
         return
     fi
 
     # ---- Phase 2: RUN (no make overhead) ----
-    # Collect the run commands: either from direct_run_argsets overrides
-    # or by asking the Makefile what `make run` would execute.
+    # Ask the Makefile what `make run` would execute; the binary is already
+    # built, so `make -n run` only prints run commands. Join backslash-
+    # continuation lines before splitting into commands.
     local -a runcmds=()
+    local accum=""
     while IFS= read -r line; do
-        [[ -n "$line" ]] && runcmds+=("$line")
-    done < <(direct_run_argsets "$name" "$HIPCC_ARCH")
-
-    if [[ ${#runcmds[@]} -eq 0 ]]; then
-        # Extract commands from the Makefile's run recipe via dry-run.
-        # Binary is already built, so make -n run only prints run commands.
-        # Join backslash-continuation lines before splitting into commands.
-        local accum=""
-        while IFS= read -r line; do
-            if [[ "$line" == *'\' ]]; then
-                accum+="${line%\\} "
-            else
-                accum+="$line"
-                [[ -n "$accum" ]] && runcmds+=("$accum")
-                accum=""
-            fi
-        done < <(make -n run HIP_ARCH="$HIPCC_ARCH" "${make_extra[@]}" 2>/dev/null)
-        [[ -n "$accum" ]] && runcmds+=("$accum")
-    fi
+        if [[ "$line" == *'\' ]]; then
+            accum+="${line%\\} "
+        else
+            accum+="$line"
+            [[ -n "$accum" ]] && runcmds+=("$accum")
+            accum=""
+        fi
+    done < <(make -n run "${MAKE_ARGS[@]}" 2>/dev/null)
+    [[ -n "$accum" ]] && runcmds+=("$accum")
 
     if [[ ${#runcmds[@]} -eq 0 ]]; then
         log_error "Failed: $name (no run commands found)"
         echo "$name" >> "$LOG_DIR/failed.log"
-        clear_special_env "$name"
         cd "$SCRIPT_DIR"
         return
     fi
@@ -368,8 +215,7 @@ bench_one() {
 
     if [[ $rc -eq 0 ]]; then
         local time_detail="build ${build_elapsed}s, run ${run_elapsed}s"
-        local validation_issues
-        if validation_issues=$(check_output_validation "$log" "$name"); then
+        if check_output_validation "$log" >/dev/null; then
             log_success "$name (${time_detail})"
             echo "$name" >> "$LOG_DIR/success.log"
         else
@@ -385,7 +231,6 @@ bench_one() {
         echo "$name" >> "$LOG_DIR/failed.log"
     fi
 
-    clear_special_env "$name"
     cd "$SCRIPT_DIR"
 }
 
@@ -393,26 +238,17 @@ bench_one() {
 # DISCOVER & ITERATE
 # ==============================================================================
 
-if [[ -n "$BENCHMARK_FILTER" ]]; then
-    # Build dirs directly from the filter/preset list — no need to scan all dirs
-    declare -a dirs=()
-    IFS=',' read -ra wanted <<< "$BENCHMARK_FILTER"
-    for w in "${wanted[@]}"; do
-        w="${w## }"; w="${w%% }"
-        [[ -z "$w" ]] && continue
-        local_dir="$HECBENCH_SRC/$w"
-        [[ -d "$local_dir" ]] && dirs+=("$local_dir")
-    done
-    if [[ ${#dirs[@]} -eq 0 ]]; then
-        log_error "Filter matched no benchmarks: $BENCHMARK_FILTER"
-        exit 1
-    fi
-else
-    mapfile -t dirs < <(find "$HECBENCH_SRC" -maxdepth 1 -type d -name "*-hip" | sort)
-    if [[ ${#dirs[@]} -eq 0 ]]; then
-        log_error "No *-hip directories under $HECBENCH_SRC"
-        exit 1
-    fi
+declare -a dirs=()
+IFS=',' read -ra wanted <<< "$BENCHMARK_FILTER"
+for w in "${wanted[@]}"; do
+    w="${w## }"; w="${w%% }"
+    [[ -z "$w" ]] && continue
+    local_dir="$HECBENCH_SRC/$w"
+    [[ -d "$local_dir" ]] && dirs+=("$local_dir")
+done
+if [[ ${#dirs[@]} -eq 0 ]]; then
+    log_error "Filter matched no benchmarks: $BENCHMARK_FILTER"
+    exit 1
 fi
 
 log_info "Processing ${#dirs[@]} benchmarks..."
@@ -439,7 +275,6 @@ log_info "  Success:       $(count success.log)"
 log_info "  Suspect:       $(count suspect.log)  (exit 0 but output has failures)"
 log_info "  Failed:        $(count failed.log)"
 log_info "  Timeout:       $(count timeout.log)"
-log_info "  Skipped:       $(count skipped.log)"
 log_info ""
 log_info "Logs:    $LOG_DIR"
 log_info "Timings: $LOG_DIR/timings.csv"
