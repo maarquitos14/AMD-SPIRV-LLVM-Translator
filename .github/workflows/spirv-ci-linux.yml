@@ -16,7 +16,7 @@ env:
   ROCM_EXAMPLES_REF: 33f07a01bd386a5213de5d8253df69b11dcf7bdd
   # Pinned ORNL/HeCBench revision for the test_hecbench job (not a moving branch,
   # so upstream churn can't fail unrelated PRs). Bump after re-validating the subset.
-  HECBENCH_REF: ab972efc2e3514bb7704c6685f2629f1638b8a50
+  HECBENCH_REF: 10fb6ca670497bdaf3ba27780f4d8a0765989029
   LLVM_BUILD: build
   DEVLIBS_BUILD: build-device-libs
   COMGR_BUILD: build-comgr

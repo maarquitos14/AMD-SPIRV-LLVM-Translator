@@ -41,6 +41,7 @@ inversek2j-sycl
 is-cuda
 kiss-cuda
 laplace3d-cuda
+ldpc-cuda
 log2-cuda
 lud-cuda
 marchingCubes-cuda
