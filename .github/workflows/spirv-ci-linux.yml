@@ -700,6 +700,12 @@ jobs:
       options: |
         --device=/dev/kfd --device=/dev/dri  --group-add video
 
+    # Single source of truth for the HeCBench log dir: bench.sh writes here, and
+    # the gate + upload steps read the same value. Tagged with the run id (+
+    # attempt) so the uploaded logs map back to this exact workflow run.
+    env:
+      HECBENCH_LOG_DIR: ${{ github.workspace }}/SPIRV-LLVM-Translator/.github/hecbench/bench_logs_${{ github.run_id }}-${{ github.run_attempt }}_amdgcnspirv-be
+
     steps:
       # Check out this repo at the PR commit for the vendored HeCBench scripts
       # in .github/hecbench. Into a subdir so it doesn't collide with the build
@@ -760,28 +766,25 @@ jobs:
 
       - name: Gate on HeCBench results
         if: always()
-        env:
-          SCRIPTS: ${{ github.workspace }}/SPIRV-LLVM-Translator/.github/hecbench
         run: |
-          LOG_DIR=$(ls -dt "$SCRIPTS"/bench_logs_*_amdgcnspirv-be 2>/dev/null | head -1)
-          if [[ -z "$LOG_DIR" ]]; then
+          if [[ ! -d "$HECBENCH_LOG_DIR" ]]; then
             echo "::error::No HeCBench log dir produced (run step failed early)."
             exit 1
           fi
-          echo "Log dir: $LOG_DIR"
+          echo "Log dir: $HECBENCH_LOG_DIR"
           for cat in success suspect failed timeout skipped; do
-            n=$( [[ -f "$LOG_DIR/$cat.log" ]] && wc -l < "$LOG_DIR/$cat.log" || echo 0 )
+            n=$( [[ -f "$HECBENCH_LOG_DIR/$cat.log" ]] && wc -l < "$HECBENCH_LOG_DIR/$cat.log" || echo 0 )
             echo "  $cat: $n"
           done
           rc=0
           for cat in failed timeout suspect; do
-            if [[ -s "$LOG_DIR/$cat.log" ]]; then
-              echo "::group::$cat"; cat "$LOG_DIR/$cat.log"; echo "::endgroup::"
-              echo "::error::HeCBench $cat: $(wc -l < "$LOG_DIR/$cat.log") benchmark(s)."
+            if [[ -s "$HECBENCH_LOG_DIR/$cat.log" ]]; then
+              echo "::group::$cat"; cat "$HECBENCH_LOG_DIR/$cat.log"; echo "::endgroup::"
+              echo "::error::HeCBench $cat: $(wc -l < "$HECBENCH_LOG_DIR/$cat.log") benchmark(s)."
               rc=1
             fi
           done
-          if [[ ! -s "$LOG_DIR/success.log" ]]; then
+          if [[ ! -s "$HECBENCH_LOG_DIR/success.log" ]]; then
             echo "::error::No HeCBench benchmark succeeded — toolchain/setup problem."
             rc=1
           fi
@@ -792,5 +795,5 @@ jobs:
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: hecbench-logs
-          path: SPIRV-LLVM-Translator/.github/hecbench/bench_logs_*_amdgcnspirv-be/
+          path: ${{ env.HECBENCH_LOG_DIR }}/
           if-no-files-found: ignore

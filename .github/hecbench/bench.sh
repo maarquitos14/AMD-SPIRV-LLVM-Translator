@@ -41,7 +41,7 @@ Environment Variables:
     HIP_CLANG_PATH     clang bin dir for hipcc to drive (default: \$ROCM_PATH/bin)
 
 Output:
-    bench_logs_YYYYMMDD_HHMMSS_amdgcnspirv-be/
+    $HECBENCH_LOG_DIR (CI), else bench_logs_YYYYMMDD_HHMMSS_amdgcnspirv-be/
         timings.csv    benchmark,build_seconds,run_seconds
         success.log    built and ran cleanly
         failed.log     non-zero exit (build or run)
@@ -81,7 +81,10 @@ HECBENCH_SRC=$(find_hecbench_src "$SCRIPT_DIR") || {
     exit 1
 }
 
-LOG_DIR="${SCRIPT_DIR}/bench_logs_$(date +%Y%m%d_%H%M%S)_${ARCH}"
+# In CI the workflow owns the log dir name (HECBENCH_LOG_DIR) so the gate and
+# upload steps reference the same value — change it in one place. Outside CI it's
+# unset, so fall back to a local timestamped dir next to this script.
+LOG_DIR="${HECBENCH_LOG_DIR:-${SCRIPT_DIR}/bench_logs_$(date +%Y%m%d_%H%M%S)_${ARCH}}"
 mkdir -p "$LOG_DIR"
 
 export PATH="${ROCM_PATH}/bin:${PATH}"
