@@ -681,10 +681,8 @@ jobs:
   # =====================================================================
   # Test - HeCBench (curated subset, amdgcnspirv-be backend)
   # =====================================================================
-  # Builds + runs a curated HeCBench subset through the in-tree SPIRV backend
-  # (the default codegen path) and gates on each benchmark's self-verification.
-  # Driver scripts and subset list are vendored under .github/hecbench. Budgeted
-  # at ~15 min to stay off the critical path.
+  # Builds + runs a curated HeCBench subset through the in-tree SPIRV backend and
+  # gates on each benchmark's self-verification. Scripts vendored in .github/hecbench.
   test_hecbench:
     name: Test HeCBench
     needs: build
@@ -700,19 +698,13 @@ jobs:
       options: |
         --device=/dev/kfd --device=/dev/dri  --group-add video
 
-    # Job-wide constants so each is defined once. SCRIPTS is the vendored driver
-    # dir; HECBENCH_LOG_DIR is the single source of truth for the log dir (bench.sh
-    # writes it, the gate + upload steps read it), tagged with the run id (+
-    # attempt) so the uploaded logs map back to this exact workflow run. (An env
-    # entry can't reference another, so HECBENCH_LOG_DIR respells the SCRIPTS path.)
     env:
       SCRIPTS: ${{ github.workspace }}/SPIRV-LLVM-Translator/.github/hecbench
       HECBENCH_LOG_DIR: ${{ github.workspace }}/SPIRV-LLVM-Translator/.github/hecbench/bench_logs_${{ github.run_id }}-${{ github.run_attempt }}_amdgcnspirv-be
 
     steps:
-      # Check out this repo at the PR commit for the vendored HeCBench scripts
-      # in .github/hecbench. Into a subdir so it doesn't collide with the build
-      # artifact, which untars build/ and staging/ at the workspace root.
+      # Check out this repo (PR head) for the vendored .github/hecbench scripts,
+      # into a subdir so it doesn't collide with the untarred build/ + staging/.
       - name: Checkout SPIRV-LLVM-Translator (PR head)
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:

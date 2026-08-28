@@ -81,9 +81,7 @@ HECBENCH_SRC=$(find_hecbench_src "$SCRIPT_DIR") || {
     exit 1
 }
 
-# In CI the workflow owns the log dir name (HECBENCH_LOG_DIR) so the gate and
-# upload steps reference the same value — change it in one place. Outside CI it's
-# unset, so fall back to a local timestamped dir next to this script.
+# CI sets HECBENCH_LOG_DIR (single source of truth); local runs get a timestamp.
 LOG_DIR="${HECBENCH_LOG_DIR:-${SCRIPT_DIR}/bench_logs_$(date +%Y%m%d_%H%M%S)_${ARCH}}"
 mkdir -p "$LOG_DIR"
 
@@ -103,9 +101,8 @@ export HIP_DEVICE_LIB_PATH="${ROCM_PATH}/amdgcn/bitcode"
 export ROCR_VISIBLE_DEVICES="$GPU_ID"
 ulimit -s unlimited 2>/dev/null || true
 
-# libhipcxx <chrono> hard-errors on amdgcnspirv because no compile-time __gfx*__
-# macro is defined for SPIR-V; allow it through and silence the warning. NDEBUG
-# keeps host-side asserts out of timing paths. Passed to every benchmark build.
+# libhipcxx <chrono> hard-errors on amdgcnspirv (no compile-time __gfx*__ macro);
+# the define lets it through. NDEBUG keeps host asserts out of timing paths.
 declare -a MAKE_ARGS=(
     HIP_ARCH="$HIPCC_ARCH"
     "EXTRA_CFLAGS=-D_LIBCUDACXX_ALLOW_UNSUPPORTED_ARCHITECTURE -DNDEBUG"
@@ -127,10 +124,8 @@ log_info "Timeout:      ${TIMEOUT_SECONDS}s"
 log_info "GPU ID:       $GPU_ID"
 log_info "Logs:         $LOG_DIR"
 
-# Clear the COMGR JIT cache to prevent stale finalized kernels from being
-# served after a compiler or runtime update.  The cache keys are based on the
-# SPIR-V input hash, so a runtime-only update (same compiler, same SPIR-V)
-# would silently reuse the old (possibly buggy) native code.
+# Clear the COMGR JIT cache: keys are the SPIR-V hash, so a runtime-only update
+# (same SPIR-V) would otherwise serve stale native code.
 if [[ -d "${HOME}/.cache/comgr" ]]; then
     log_info "Clearing COMGR cache (${HOME}/.cache/comgr) ..."
     rm -rf "${HOME}/.cache/comgr"
@@ -181,9 +176,8 @@ bench_one() {
     fi
 
     # ---- Phase 2: RUN (no make overhead) ----
-    # Ask the Makefile what `make run` would execute; the binary is already
-    # built, so `make -n run` only prints run commands. Join backslash-
-    # continuation lines before splitting into commands.
+    # Ask the Makefile what `make run` runs (binary already built, so -n just
+    # prints); join backslash-continuation lines into whole commands.
     local -a runcmds=()
     local accum=""
     while IFS= read -r line; do

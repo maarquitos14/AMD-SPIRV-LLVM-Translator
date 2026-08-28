@@ -1,19 +1,11 @@
 #!/usr/bin/env bash
 # Regenerate ci_benchmarks.deps.txt from ci_benchmarks.txt.
 #
-# The benchmarks in ci_benchmarks.txt reference other in-tree HeCBench dirs via
-# '../<dir>' (sibling *-cuda data dirs, shared include/, etc.). The test_hecbench
-# CI job must check those out too, or the builds fail to resolve their inputs.
-# This script resolves that set transitively at the pinned HECBENCH_REF and
-# writes it to ci_benchmarks.deps.txt, so CI can do a single sparse checkout of
-# ci_benchmarks.txt + ci_benchmarks.deps.txt instead of a discover-then-expand
-# second pass.
-#
-# Re-run after editing ci_benchmarks.txt or bumping HECBENCH_REF, then commit the
-# updated ci_benchmarks.deps.txt:
-#   .github/hecbench/update_deps.sh
-# HECBENCH_REF defaults to the pin in ../workflows/spirv-ci-linux.yml; override
-# via the env var. HECBENCH_REPO overrides the clone URL.
+# Listed benchmarks reference sibling in-tree dirs via '../' (data dirs, shared
+# include/, etc.); CI must check those out too or builds fail. This resolves that
+# set transitively at HECBENCH_REF so CI does one sparse checkout, not two passes.
+# Re-run after editing ci_benchmarks.txt or HECBENCH_REF, then commit the result.
+# HECBENCH_REF defaults to the pin in the workflow; HECBENCH_REPO overrides the URL.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

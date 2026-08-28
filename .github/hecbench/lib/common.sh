@@ -120,15 +120,10 @@ find_hecbench_src() {
 # ==============================================================================
 # SHARED-MEMORY (/dev/shm) HOUSEKEEPING
 # ==============================================================================
-# OpenMPI's vader/sm BTL and RCCL leave per-rank backing files in /dev/shm
-# (e.g. vader_segment.<host>.<pid>.<key>.<rank>, nccl-XXXXXX). Normally these
-# are unlinked when ranks exit cleanly, but a SIGKILL'd or timed-out run leaks
-# them. On containers where /dev/shm is small (Docker default = 64 MiB), the
-# leaks accumulate across runs until subsequent mpirun invocations fail with
-# "not enough space for /dev/shm/...".
-#
-# Call this between benchmarks so every MPI/RCCL benchmark sees a clean slate.
-# Scoped to the current user to avoid disturbing other tenants on shared systems.
+# OpenMPI/RCCL leave per-rank backing files in /dev/shm; a SIGKILL'd or timed-out
+# run leaks them, and on a small /dev/shm (Docker default 64 MiB) they accumulate
+# until mpirun fails with "not enough space". Call between benchmarks. Scoped to
+# the current user so other tenants on shared hosts are untouched.
 cleanup_stale_shm() {
     [[ -d /dev/shm ]] || return 0
     local user="${USER:-$(id -un)}"

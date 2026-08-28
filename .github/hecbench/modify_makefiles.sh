@@ -49,15 +49,9 @@ uses_hipcc() {
     grep -q "\bhipcc\b" "$1"
 }
 
-# Inject $(EXTRA_CFLAGS) into the first matching assignment of each compile-flag
-# variable that exists in the Makefile (CFLAGS, CXXFLAGS, HIPCC_FLAGS, NVCC_FLAGS).
-# This lets bench.sh pass per-arch flags via `make EXTRA_CFLAGS=...` for the small
-# subset of Makefiles whose CFLAGS line lacks the conventional `$(EXTRA_CFLAGS)`
-# prefix that most HeCBench Makefiles already have.
-#
-# Idempotent: returns early if any $(EXTRA_CFLAGS)/${EXTRA_CFLAGS} reference is
-# already present. Patches multiple flag vars per call so a Makefile that uses
-# both CFLAGS and CXXFLAGS (e.g. halo-finder-hip) gets the hook in both rules.
+# Prepend $(EXTRA_CFLAGS) to the first CFLAGS/CXXFLAGS/HIPCC_FLAGS/NVCC_FLAGS
+# assignment so `make EXTRA_CFLAGS=...` reaches the few Makefiles lacking the
+# conventional hook. Skips Makefiles that already have it.
 inject_extra_cflags() {
     local makefile="$1"
     if grep -qE '\$\(EXTRA_CFLAGS\)|\$\{EXTRA_CFLAGS\}' "$makefile"; then
@@ -113,11 +107,9 @@ modify_makefile() {
     # $(HIPCC_BIN_DIR)/hipcc + offload-arch + device-lib-path.
     sed -i "s#\(^\|[^/})]\)\bhipcc\b#\1\$(HIPCC_BIN_DIR)/hipcc --offload-arch=\$(HIP_ARCH) --rocm-device-lib-path=${escaped_path}#g" "$makefile"
 
-    # After the rewrite, $(CC) / $(CXX) / $(HIPCC) typically expand to a
-    # multi-word string. Any nested-make recipe that passes `<VAR>=$(CC)`
-    # unquoted would word-split, corrupting the inner build. Re-quote such
-    # assignments. Restricted to recipe lines (start with TAB) so top-level
-    # Makefile assignments are not altered.
+    # After the rewrite $(CC)/$(CXX)/$(HIPCC) expand to multi-word strings; a
+    # nested-make recipe passing `<VAR>=$(CC)` unquoted would word-split. Re-quote,
+    # only on recipe lines (start with TAB) so top-level assignments are untouched.
     local TAB
     TAB=$'\t'
     sed -i -E "s#^(${TAB}.*)([A-Z][A-Z_]+=)\\\$\\((CC|CXX|HIPCC)\\)#\\1\\2\"\\\$(\\3)\"#g" "$makefile"
